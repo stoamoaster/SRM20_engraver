@@ -1,0 +1,255 @@
+<!doctype html>
+<html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>SRM-20 Gravur</title>
+<style>
+:root{--bg:#f4f3ef;--card:#fff;--ink:#1c1c1a;--mut:#6b6a64;--line:#dcdad3;--acc:#c2410c;--ok:#15803d;--warn:#b45309;
+  --plate:#e7dcc6;--plate-edge:#a8977a;--logo:#1e4fa3}
+*{box-sizing:border-box}body{margin:0;font:15px/1.45 system-ui,Segoe UI,sans-serif;background:var(--bg);color:var(--ink)}
+header{padding:16px 24px;border-bottom:1px solid var(--line);display:flex;align-items:baseline;gap:14px;flex-wrap:wrap}
+header h1{font-size:19px;margin:0}header span{color:var(--mut);font-size:13px}
+main{display:grid;grid-template-columns:360px minmax(0,1fr);gap:20px;padding:20px 24px;max-width:1400px;align-items:start}
+#view{position:sticky;top:16px}
+.col{display:flex;flex-direction:column;gap:12px;min-width:0}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:4px 16px 16px}
+.card>summary{cursor:pointer;font-weight:600;font-size:15px;padding:12px 0 4px;list-style:none;display:flex;justify-content:space-between}
+.card>summary::after{content:"▾";color:var(--mut)}.card:not([open])>summary::after{content:"▸"}
+.card:not([open]){padding-bottom:4px}
+label{display:block;font-size:12px;color:var(--mut);margin:10px 0 3px;text-transform:uppercase;letter-spacing:.04em}
+textarea,input,select{width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:6px;font:inherit;background:#fff;color:var(--ink)}
+textarea{font-size:20px;min-height:70px;resize:vertical}
+.row{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.row3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+.chk{display:flex;gap:8px;align-items:center;margin-top:12px;font-size:14px;text-transform:none;letter-spacing:0;color:var(--ink)}.chk input{width:auto}
+button{font:inherit;border:0;border-radius:7px;padding:9px 12px;cursor:pointer}
+.go{background:var(--acc);color:#fff;width:100%;font-weight:600;font-size:16px;margin-top:14px;padding:11px}
+.go:disabled{opacity:.45;cursor:not-allowed}
+.sec{background:transparent;border:1px solid var(--line);color:var(--ink)}.wide{width:100%;margin-top:8px}
+.file{display:flex;gap:8px;align-items:center;margin-top:8px;font-size:13.5px;flex-wrap:wrap}
+.file .name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--mut)}
+.file .name.has{color:var(--ink);font-weight:600}
+.btns{display:flex;gap:8px;margin-top:8px}.btns>*{flex:1}
+.note{font-size:12.5px;color:var(--mut);margin-top:6px}
+#svgwrap{background:#fbfaf7;border:1px solid var(--line);border-radius:8px;height:min(62vh,560px);min-height:300px;position:relative;overflow:hidden}
+svg{position:absolute;inset:0;width:100%;height:100%;display:block}
+.stats{display:flex;gap:22px;flex-wrap:wrap;margin:12px 0 4px;font-size:14px}.stats b{font-size:17px}
+#warn{color:var(--warn);font-size:14px}#msg{margin-top:10px;font-size:14px}
+pre{max-height:260px;overflow:auto;background:#1c1c1a;color:#e8e6df;padding:10px;border-radius:6px;font-size:12px}
+.hint{font-size:12.5px;color:var(--mut);margin-top:12px;line-height:1.5}
+.legend{display:flex;gap:16px;flex-wrap:wrap;font-size:12.5px;color:var(--mut);margin-top:8px}
+.legend i{display:inline-block;width:14px;height:3px;vertical-align:middle;margin-right:5px;border-radius:2px}
+@media(max-width:860px){main{grid-template-columns:minmax(0,1fr);padding:16px}#view{position:static;order:-1}#svgwrap{height:auto;min-height:0;aspect-ratio:4/3}}
+</style></head><body>
+<header><h1>SRM-20 Gravur</h1><span>Schild mit Text und Logo → G-Code → Fräse</span></header>
+<main>
+<div class="col">
+
+<details class="card" open><summary>Werkstück</summary>
+  <label>Form</label>
+  <select id="plate_src"><option value="rect">Platte mit runden Ecken</option><option value="file">Kontur aus Datei (DXF/DWG/SVG)</option></select>
+  <div id="rectbox">
+    <label>Vorlage</label>
+    <select id="preset"></select>
+    <div class="row3">
+      <div><label>Breite X</label><input id="plate_w" type="number" value="70" step="1" min="5"></div>
+      <div><label>Höhe Y</label><input id="plate_h" type="number" value="50" step="1" min="5"></div>
+      <div><label>Eckradius</label><input id="plate_r" type="number" value="3" step="0.5" min="0"></div>
+    </div>
+    <div class="btns"><button class="sec" id="psave">Als Vorlage speichern</button><button class="sec" id="pdel">Vorlage löschen</button></div>
+  </div>
+  <div id="filebox" hidden>
+    <div class="file"><span class="name" id="plate_name">keine Kontur geladen</span>
+      <button class="sec" data-up="plate">Datei wählen…</button><button class="sec" data-rm="plate">✕</button></div>
+    <p class="note">Geschlossener Umriss in mm. Die linke untere Ecke des Umrisses wird zum Nullpunkt.</p>
+  </div>
+  <p class="note">Nullpunkt X/Y = linke untere Ecke, Z = Oberseite des Werkstücks.</p>
+</details>
+
+<details class="card" open><summary>Text</summary>
+  <textarea id="text" placeholder="Text eingeben…">Hallo Welt</textarea>
+  <label>Schrift</label><select id="font"></select>
+  <div class="row">
+    <div><label>Höhe (mm)</label><input id="height" type="number" value="10" step="0.5" min="0.5"></div>
+    <div><label>Abstand unten</label><input id="text_bottom" type="number" value="3" step="0.5" min="0"></div>
+  </div>
+  <div class="row">
+    <div><label>Rand seitlich</label><input id="margin_side" type="number" value="3" step="0.5" min="0"></div>
+    <div><label>Zeilen ausrichten</label><select id="align"><option value="center">Mitte</option><option value="left">Links</option><option value="right">Rechts</option></select></div>
+  </div>
+  <label class="chk"><input type="checkbox" id="autoshrink" checked> zu breiten Text automatisch verkleinern</label>
+  <p class="note">Höhe = Höhe der Großbuchstaben. Der Text wird waagrecht mittig gesetzt, „Abstand unten“ gilt bis zum tiefsten Punkt (auch g, p, y).</p>
+</details>
+
+<details class="card" open><summary>Logo</summary>
+  <label class="chk" style="margin-top:4px"><input type="checkbox" id="logo_on" checked> Logo gravieren</label>
+  <div class="file"><span class="name" id="logo_name">kein Logo geladen</span>
+    <button class="sec" data-up="logo">Datei wählen…</button><button class="sec" data-rm="logo">✕</button></div>
+  <p class="note">SVG, DXF oder DWG. Wird automatisch in den freien Platz über dem Text eingepasst.</p>
+  <div class="row">
+    <div><label>Abstand zum Text</label><input id="logo_gap" type="number" value="3" step="0.5" min="0"></div>
+    <div><label>Rand oben</label><input id="margin_top" type="number" value="3" step="0.5" min="0"></div>
+  </div>
+  <div class="row3">
+    <div><label>Größe %</label><input id="logo_scale" type="number" value="100" step="5" min="1"></div>
+    <div><label>Versatz X</label><input id="logo_dx" type="number" value="0" step="0.5"></div>
+    <div><label>Versatz Y</label><input id="logo_dy" type="number" value="0" step="0.5"></div>
+  </div>
+  <label class="chk"><input type="checkbox" id="logo_fill"> Flächen mit Linien füllen</label>
+  <div class="row">
+    <div><label>Linienabstand</label><input id="fill_step" type="number" value="0.25" step="0.05" min="0.05"></div>
+    <div><label>Tiefe Logo (mm)</label><input id="logo_depth" type="number" value="0.2" step="0.05" min="0.01"></div>
+  </div>
+</details>
+
+<details class="card" open><summary>Fräsen</summary>
+  <div class="row">
+    <div><label>Tiefe Text (mm)</label><input id="depth" type="number" value="0.2" step="0.05" min="0.01"></div>
+    <div><label>Linienbreite (mm)</label><input id="line_w" type="number" value="0.3" step="0.05" min="0.05" title="nur für die Vorschau"></div>
+  </div>
+  <details><summary style="cursor:pointer;margin-top:12px;font-size:14px">Fräsparameter</summary>
+    <div class="row">
+      <div><label>Vorschub (mm/min)</label><input id="feed" type="number" value="240"></div>
+      <div><label>Eintauchen (mm/min)</label><input id="plunge" type="number" value="60"></div>
+    </div>
+    <div class="row">
+      <div><label>Drehzahl (U/min)</label><input id="rpm" type="number" value="7000" max="7000"></div>
+      <div><label>Sicherheits-Z (mm)</label><input id="safe_z" type="number" value="2" step="0.5"></div>
+    </div>
+    <label>Durchgänge</label><input id="passes" type="number" value="1" min="1" max="10">
+  </details>
+  <label>Modus</label>
+  <select id="mode">
+    <option value="engrave">Gravieren</option>
+    <option value="air">Luftschnitt – Gravur 1 mm über der Oberfläche</option>
+    <option value="outline">Werkstück-Umriss 1 mm über der Oberfläche abfahren</option>
+  </select>
+  <label>Fräse (Windows-Drucker)</label><select id="printer"></select>
+  <button class="go" id="send">An Fräse senden</button>
+  <button class="sec wide" id="dl">G-Code herunterladen (.nc)</button>
+  <div id="msg"></div>
+  <p class="hint">Vorher in VPanel: Befehlssatz <b>NC-Code</b>, X/Y-Nullpunkt auf die linke untere Ecke und Z-Nullpunkt auf die Oberseite setzen. Abbrechen über VPanel oder die VIEW-Taste an der Maschine.</p>
+</details>
+</div>
+
+<section class="card" id="view" style="padding-top:16px">
+  <div id="svgwrap"><svg id="svg"></svg></div>
+  <div class="legend"><span><i style="background:var(--ink)"></i>Text</span><span><i style="background:var(--logo)"></i>Logo</span><span><i style="background:var(--acc)"></i>Nullpunkt</span><span><i style="border-top:1px dashed var(--mut);height:0"></i>Platz fürs Logo</span></div>
+  <div class="stats"><div>Werkstück <b id="psize">–</b></div><div>Text <b id="tsize">–</b></div><div>Dauer ca. <b id="time">–</b></div><div>Zeilen <b id="lines">–</b></div></div>
+  <div id="warn"></div>
+  <details><summary style="cursor:pointer;margin-top:10px">G-Code ansehen</summary><pre id="code"></pre></details>
+</section>
+</main>
+<input type="file" id="fileinput" accept=".svg,.dxf,.dwg" hidden>
+<script>
+const $=id=>document.getElementById(id);
+const ids=["plate_src","plate_w","plate_h","plate_r","text","font","height","text_bottom","margin_side","align","autoshrink",
+  "logo_on","logo_gap","margin_top","logo_scale","logo_dx","logo_dy","logo_fill","fill_step","logo_depth",
+  "depth","line_w","feed","plunge","rpm","safe_z","passes","mode"];
+const KEY="srm20-gravur-v2";
+let last=null,timer=null,presets=[],seq=0;
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+
+function params(){const p={};ids.forEach(i=>{const e=$(i);p[i]=e.type==="checkbox"?e.checked:e.value});p.printer=$("printer").value;return p}
+function store(){try{localStorage.setItem(KEY,JSON.stringify(params()))}catch(e){}}
+function restore(){
+  let s=null;try{s=JSON.parse(localStorage.getItem(KEY)||"null")}catch(e){}
+  if(!s)return;$("font").dataset.saved=s.font||"";ids.forEach(i=>{if(i in s&&i!=="mode"){const e=$(i);if(e.type==="checkbox")e.checked=!!s[i];else e.value=s[i]}});
+}
+async function api(url,opt){const r=await fetch(url,opt);return r.json()}
+
+async function info(){
+  const r=await api("/api/info");const font=$("font").dataset.saved||$("font").value;
+  $("font").innerHTML=Object.entries(r.fonts).map(([k,v])=>`<option value="${k}">${esc(v)}</option>`).join("");
+  if(font in r.fonts)$("font").value=font;
+  if(r.printers.length){$("printer").innerHTML=r.printers.map(n=>`<option>${esc(n)}</option>`).join("");$("send").disabled=false}
+  else{$("printer").innerHTML="<option value=''>keine Drucker gefunden</option>";$("send").disabled=true;
+    if(!r.windows)$("msg").textContent="Senden nur unter Windows mit pywin32 möglich – Vorschau und Download funktionieren."}
+  showAssets(r.assets);setPresets(r.presets);
+}
+function showAssets(a){
+  for(const k of ["logo","plate"]){
+    const el=$(k+"_name");
+    el.textContent=a[k]?a[k].name:(k==="logo"?"kein Logo geladen":"keine Kontur geladen");
+    el.classList.toggle("has",!!a[k]);el.title=a[k]&&a[k].notes.length?a[k].notes.join("\n"):"";
+  }
+}
+function setPresets(list){
+  presets=list;
+  $("preset").innerHTML=`<option value="">– eigene Maße –</option>`+list.map((p,i)=>`<option value="${i}">${esc(p.name)}</option>`).join("");
+  matchPreset();
+}
+function matchPreset(){
+  const w=+$("plate_w").value,h=+$("plate_h").value,r=+$("plate_r").value;
+  const i=presets.findIndex(p=>p.w===w&&p.h===h&&p.r===r);
+  $("preset").value=i<0?"":String(i);
+  $("pdel").disabled=i<0||!!presets[i].builtin;
+}
+function toggleSrc(){const f=$("plate_src").value==="file";$("rectbox").hidden=f;$("filebox").hidden=!f}
+
+function schedule(){clearTimeout(timer);timer=setTimeout(update,200)}
+async function update(){
+  const my=++seq;store();
+  const r=await api("/api/preview",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(params())});
+  if(my!==seq)return; // ältere Antwort verwerfen
+  last=r;draw(r);
+  const [pw,ph]=r.plate_size;$("psize").textContent=`${+pw.toFixed(1)} × ${+ph.toFixed(1)} mm`;
+  const tb=r.text_bbox;$("tsize").textContent=tb?`${(tb[2]-tb[0]).toFixed(1)} × ${(tb[3]-tb[1]).toFixed(1)} mm (H ${r.text_height.toFixed(1)})`:"–";
+  const s=Math.round(r.minutes*60);$("time").textContent=s?(s<60?s+" s":Math.floor(s/60)+" min "+(s%60)+" s"):"–";
+  $("lines").textContent=r.lines;$("code").textContent=r.gcode;
+  $("warn").innerHTML=r.warnings.map(w=>"⚠ "+esc(w)).join("<br>");
+}
+function poly(s){return s.map(p=>p[0]+","+(-p[1])).join(" ")}
+function draw(r){
+  const svg=$("svg");const [pw,ph]=r.plate_size;
+  const m=Math.max(pw,ph)*0.1+4,vx=-m,vy=-ph-m,vw=pw+2*m,vh=ph+2*m;
+  svg.setAttribute("viewBox",`${vx} ${vy} ${vw} ${vh}`);
+  const sw=Math.max(vw,vh)/500,fs=Math.max(vw,vh)/45,lw=Math.max(+$("line_w").value||0.3,sw);
+  const d=r.plate.map(s=>"M"+s.map(p=>p[0]+" "+(-p[1])).join(" L")+"Z").join(" ");
+  let o=`<path d="${d}" fill="var(--plate)" fill-rule="evenodd" stroke="var(--plate-edge)" stroke-width="${sw*1.5}"/>`;
+  // Maße
+  o+=`<g fill="var(--mut)" font-size="${fs}" font-family="system-ui,sans-serif" text-anchor="middle">
+    <text x="${pw/2}" y="${fs*1.6}">${+pw.toFixed(1)} mm</text>
+    <text transform="translate(${-fs*0.9},${-ph/2}) rotate(-90)">${+ph.toFixed(1)} mm</text></g>`;
+  if(r.logo_area&&$("logo_on").checked){const [a,b,c,e]=r.logo_area;
+    o+=`<rect x="${a}" y="${-e}" width="${Math.max(c-a,0)}" height="${Math.max(e-b,0)}" fill="none" stroke="var(--mut)" stroke-dasharray="${sw*4} ${sw*3}" stroke-width="${sw}"/>`}
+  const g=(list,col,w)=>`<g fill="none" stroke="${col}" stroke-width="${w}" stroke-linecap="round" stroke-linejoin="round">`+list.map(s=>`<polyline points="${poly(s)}"/>`).join("")+"</g>";
+  o+=g(r.logo,"var(--logo)",lw)+g(r.text,"var(--ink)",lw);
+  o+=`<line x1="0" y1="0" x2="${fs*1.6}" y2="0" stroke="var(--acc)" stroke-width="${sw*1.5}"/><line x1="0" y1="0" x2="0" y2="${-fs*1.6}" stroke="var(--acc)" stroke-width="${sw*1.5}"/>
+    <circle r="${sw*3.5}" fill="var(--acc)"/><text x="${-fs*0.4}" y="${fs*1.1}" font-size="${fs*0.8}" fill="var(--acc)" text-anchor="end" font-family="system-ui,sans-serif">0/0</text>`;
+  svg.innerHTML=o;
+}
+
+ids.forEach(i=>{$(i).addEventListener("input",schedule);$(i).addEventListener("change",schedule)});
+["plate_w","plate_h","plate_r"].forEach(i=>$(i).addEventListener("input",matchPreset));
+$("plate_src").addEventListener("change",toggleSrc);
+$("preset").onchange=()=>{const p=presets[+$("preset").value];if(!p||$("preset").value==="")return matchPreset();
+  $("plate_w").value=p.w;$("plate_h").value=p.h;$("plate_r").value=p.r;matchPreset();schedule()};
+$("psave").onclick=async()=>{const name=prompt("Name der Vorlage:",`Platte ${$("plate_w").value} × ${$("plate_h").value} mm`);if(!name)return;
+  const r=await api("/api/presets",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({name,w:$("plate_w").value,h:$("plate_h").value,r:$("plate_r").value})});
+  if(r.ok)setPresets(r.presets);else alert(r.error)};
+$("pdel").onclick=async()=>{const p=presets[+$("preset").value];if(!p||p.builtin)return;if(!confirm(`Vorlage „${p.name}“ löschen?`))return;
+  const r=await api("/api/presets?name="+encodeURIComponent(p.name),{method:"DELETE"});setPresets(r.presets)};
+
+let upKind=null;
+document.querySelectorAll("[data-up]").forEach(b=>b.onclick=()=>{upKind=b.dataset.up;$("fileinput").value="";$("fileinput").click()});
+document.querySelectorAll("[data-rm]").forEach(b=>b.onclick=async()=>{await api("/api/upload/"+b.dataset.rm,{method:"DELETE"});await info();schedule()});
+$("fileinput").onchange=async()=>{
+  const f=$("fileinput").files[0];if(!f||!upKind)return;
+  const fd=new FormData();fd.append("file",f);$("msg").textContent=`Lade ${f.name}…`;
+  let r;try{r=await api("/api/upload/"+upKind,{method:"POST",body:fd})}catch(e){r={ok:false,error:"Upload fehlgeschlagen (Datei zu groß?)"}}
+  if(r.ok){$("msg").innerHTML=`<span style="color:var(--ok)">✓ ${esc(r.name)} geladen (${r.size[0]} × ${r.size[1]} mm)</span>`+(r.notes.length?"<br>"+r.notes.map(esc).join("<br>"):"");
+    if(upKind==="logo")$("logo_on").checked=true;if(upKind==="plate"){$("plate_src").value="file";toggleSrc()}}
+  else $("msg").innerHTML=`<span style="color:var(--acc)">Fehler: ${esc(r.error)}</span>`;
+  await info();schedule();
+};
+$("dl").onclick=()=>{if(!last)return;const a=document.createElement("a");
+  a.href=URL.createObjectURL(new Blob([last.gcode],{type:"text/plain"}));a.download="gravur.nc";a.click()};
+$("send").onclick=async()=>{
+  const p=params();
+  const what={engrave:"GRAVUR",air:"LUFTSCHNITT (1 mm über der Oberfläche)",outline:"UMRISS ABFAHREN (1 mm über der Oberfläche)"}[p.mode];
+  if(!confirm(`${what} starten?\n\n${p.mode==="outline"?"":`"${p.text}"\nTiefe Text: ${p.depth} mm`+($("logo_on").checked&&last&&last.logo.length?` · Logo: ${p.logo_depth} mm`:"")+"\n"}\nNullpunkt links unten + Z auf der Oberfläche gesetzt? NC-Code-Modus aktiv?`))return;
+  $("send").disabled=true;$("msg").textContent="Sende…";
+  const r=await api("/api/send",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(p)});
+  $("msg").innerHTML=r.ok?`<span style="color:var(--ok)">✓ An Fräse gesendet.</span>`:`<span style="color:var(--acc)">Fehler: ${esc(r.error)}</span>`;
+  setTimeout(()=>$("send").disabled=false,3000);
+};
+restore();toggleSrc();info().then(update);
+</script></body></html>

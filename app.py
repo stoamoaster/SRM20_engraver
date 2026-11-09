@@ -1,24 +1,35 @@
 """
-SRM-20 Gravur – Text eingeben, Vorschau ansehen, direkt an die Roland SRM-20 senden.
+SRM-20 Gravur – Schild mit Text und Logo gestalten, Vorschau ansehen, direkt an die Roland SRM-20 senden.
 
-Start:  python app.py   ->  Browser: http://localhost:5000
-Voraussetzung: Roland-Treiber installiert, SRM-20 in VPanel auf "NC-Code" gestellt,
-               Nullpunkt (X/Y und Z auf Werkstückoberfläche) in VPanel gesetzt.
+Start:  start.bat   (oder: python app.py)  ->  Browser: http://localhost:5000
+Voraussetzung: Roland-Treiber installiert, SRM-20 in VPanel auf "NC-Code" gestellt.
+Nullpunkt: X/Y = linke untere Ecke des Werkstücks, Z = Oberseite des Werkstücks.
 """
+import json
 import math
+import re
 import sys
+from pathlib import Path
 
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, send_file
 from HersheyFonts import HersheyFonts
+
+import importer
 
 try:
     import win32print  # pywin32 – nur unter Windows verfügbar
 except ImportError:
     win32print = None
 
+BASE = Path(__file__).resolve().parent
+DATA = BASE / "data"  # hochgeladenes Logo, Werkstück-Kontur, eigene Vorlagen
+
 # Arbeitsbereich SRM-20 (X x Y in mm)
 WORK_X, WORK_Y = 203.2, 152.4
 MAX_CHARS = 200
+EDGE_MIN = 0.5  # mm – näher am Werkstückrand gibt es eine Warnung
+
+DEFAULT_PRESETS = [{"name": "Platte 70 × 50 mm", "w": 70, "h": 50, "r": 3, "builtin": True}]
 
 FONTS = {
     "futural": "Futura leicht (einfach, empfohlen)",
@@ -35,6 +46,8 @@ UMLAUTS = {"ä": "a", "ö": "o", "ü": "u", "Ä": "A", "Ö": "O", "Ü": "U"}
 _font_cache = {}
 
 
+# ---------------------------------------------------------------- Text
+
 def get_font(name):
     if name not in FONTS:
         name = "futural"
@@ -48,8 +61,8 @@ def get_font(name):
     return _font_cache[name]
 
 
-def text_to_strokes(text, height, font_name, line_spacing=1.6, align="left"):
-    """Liefert eine Liste von Polylinien [(x,y), ...] in mm."""
+def text_to_strokes(text, height, font_name, line_spacing=1.6, align="center"):
+    """Liefert eine Liste von Polylinien [(x,y), ...] in mm. Grundlinie der 1. Zeile bei y=0."""
     font, cap, base = get_font(font_name)
     k = height / cap
     lines_out = []
@@ -76,10 +89,10 @@ def text_to_strokes(text, height, font_name, line_spacing=1.6, align="left"):
             line_strokes.extend(glyph)
 
         y_off = -li * height * line_spacing
-        scaled = [[((x) * k, (y - base) * k + y_off) for x, y in s] for s in line_strokes if len(s) >= 2]
+        scaled = [[(x * k, (y - base) * k + y_off) for x, y in s] for s in line_strokes if len(s) >= 2]
         lines_out.append(scaled)
 
-    # Zeilen ausrichten
+    # Zeilen zueinander ausrichten
     widths = []
     for ls in lines_out:
         xs = [p[0] for s in ls for p in s]
@@ -93,25 +106,98 @@ def text_to_strokes(text, height, font_name, line_spacing=1.6, align="left"):
     return strokes
 
 
-def place(strokes, anchor):
-    """Verschiebt den Text relativ zum Nullpunkt."""
+def missing_chars(text, font):
+    f = get_font(font)[0]
+    return sorted({c for c in text if c not in "\n ß" and c not in UMLAUTS
+                   and not list(f.strokes_for_text(c))})
+
+
+# ---------------------------------------------------------------- Geometrie
+
+def bbox_of(strokes):
     pts = [p for s in strokes for p in s]
     if not pts:
-        return strokes, (0, 0, 0, 0)
-    x0, x1 = min(p[0] for p in pts), max(p[0] for p in pts)
-    y0, y1 = min(p[1] for p in pts), max(p[1] for p in pts)
-    if anchor == "center":
-        dx, dy = -(x0 + x1) / 2, -(y0 + y1) / 2
-    else:  # links unten
-        dx, dy = -x0, -y0
-    moved = [[(x + dx, y + dy) for x, y in s] for s in strokes]
-    return moved, (x0 + dx, y0 + dy, x1 + dx, y1 + dy)
+        return None
+    xs = [p[0] for p in pts]
+    ys = [p[1] for p in pts]
+    return min(xs), min(ys), max(xs), max(ys)
 
 
-def optimize_order(strokes):
+def transform(strokes, k=1.0, dx=0.0, dy=0.0):
+    return [[(x * k + dx, y * k + dy) for x, y in s] for s in strokes]
+
+
+def rounded_rect(w, h, r, seg=12):
+    """Umriss einer Platte mit runden Ecken, linke untere Ecke (des Rechtecks) bei 0/0."""
+    r = max(0.0, min(r, w / 2, h / 2))
+    if r <= 0:
+        return [[(0, 0), (w, 0), (w, h), (0, h), (0, 0)]]
+    pts = []
+    for cx, cy, a0 in ((w - r, r, -90), (w - r, h - r, 0), (r, h - r, 90), (r, r, 180)):
+        for i in range(seg + 1):
+            a = math.radians(a0 + 90 * i / seg)
+            pts.append((cx + r * math.cos(a), cy + r * math.sin(a)))
+    pts.append(pts[0])
+    return [pts]
+
+
+def is_closed(s):
+    return len(s) >= 3 and math.dist(s[0], s[-1]) < 0.05
+
+
+def _seg_dist(p, a, b):
+    (px, py), (ax, ay), (bx, by) = p, a, b
+    dx, dy = bx - ax, by - ay
+    L = dx * dx + dy * dy
+    t = 0 if L == 0 else max(0, min(1, ((px - ax) * dx + (py - ay) * dy) / L))
+    return math.hypot(px - ax - t * dx, py - ay - t * dy)
+
+
+def edge_distance(pt, plate):
+    """Abstand zum Werkstückrand: positiv = innen, negativ = außerhalb."""
+    if plate["kind"] == "rect":
+        w, h, r = plate["w"], plate["h"], plate["r"]
+        r = max(0.0, min(r, w / 2, h / 2))
+        qx = abs(pt[0] - w / 2) - (w / 2 - r)
+        qy = abs(pt[1] - h / 2) - (h / 2 - r)
+        return -(math.hypot(max(qx, 0), max(qy, 0)) + min(max(qx, qy), 0) - r)
+    # freie Kontur: gerade/ungerade-Regel + kürzester Abstand zu einer Kante
+    x, y = pt
+    inside = False
+    best = float("inf")
+    for s in plate["strokes"]:
+        for a, b in zip(s, s[1:]):
+            if (a[1] > y) != (b[1] > y) and x < a[0] + (y - a[1]) * (b[0] - a[0]) / (b[1] - a[1]):
+                inside = not inside
+            best = min(best, _seg_dist(pt, a, b))
+    return best if inside else -best
+
+
+def hatch(strokes, spacing):
+    """Füllt geschlossene Konturen mit waagrechten Linien (gerade/ungerade-Regel, Löcher bleiben frei)."""
+    closed = [s for s in strokes if is_closed(s)]
+    bb = bbox_of(closed)
+    if not bb or spacing <= 0:
+        return []
+    edges = [(a, b) for s in closed for a, b in zip(s, s[1:]) if a[1] != b[1]]
+    out, flip = [], False
+    y = bb[1] + spacing / 2
+    while y < bb[3]:
+        xs = sorted(a[0] + (y - a[1]) * (b[0] - a[0]) / (b[1] - a[1])
+                    for a, b in edges if (a[1] <= y < b[1]) or (b[1] <= y < a[1]))
+        segs = [(xs[i], xs[i + 1]) for i in range(0, len(xs) - 1, 2) if xs[i + 1] - xs[i] > 1e-3]
+        if flip:
+            segs = [(b, a) for a, b in reversed(segs)]
+        out += [[(a, y), (b, y)] for a, b in segs]
+        flip = not flip
+        y += spacing
+    return out
+
+
+def optimize_order(strokes, start=(0.0, 0.0)):
     """Nächster-Nachbar-Sortierung, damit der Fräser nicht kreuz und quer fährt."""
     remaining = strokes[:]
-    out, pos = [], (0.0, 0.0)
+    out, pos = [], start
     while remaining:
         best_i, best_d, rev = 0, float("inf"), False
         for i, s in enumerate(remaining):
@@ -126,36 +212,44 @@ def optimize_order(strokes):
     return out
 
 
-def make_gcode(strokes, depth, safe_z, feed, plunge, rpm, passes):
+# ---------------------------------------------------------------- G-Code
+
+def make_gcode(jobs, safe_z, feed, plunge, rpm, passes):
+    """jobs: Liste von (strokes, tiefe). Tiefe < 0 = über der Oberfläche (Luftschnitt)."""
     g = ["%", "G90 G21 G17", f"M03 S{int(rpm)}", f"G00 Z{safe_z:.3f}"]
     cut_len = travel = 0.0
     pos = (0.0, 0.0)
     plunges = 0
-    down = False
-    for p_i in range(1, passes + 1):
-        z = -depth * p_i / passes
-        for s in strokes:
-            x, y = s[0]
-            # Schließt der Strich direkt an, bleibt der Fräser unten
-            if not (down and math.dist(pos, (x, y)) < 0.01):
-                if down:
-                    g.append(f"G00 Z{safe_z:.3f}")
-                g.append(f"G00 X{x:.3f} Y{y:.3f}")
-                g.append(f"G01 Z{z:.3f} F{plunge:.0f}")
-                travel += math.dist(pos, (x, y))
-                plunges += 1
-                down = True
-            for i, ((ax, ay), (bx, by)) in enumerate(zip(s, s[1:])):
-                g.append(f"G01 X{bx:.3f} Y{by:.3f}" + (f" F{feed:.0f}" if i == 0 else ""))
-                cut_len += math.hypot(bx - ax, by - ay)
-            pos = s[-1]
-        g.append(f"G00 Z{safe_z:.3f}")
-        down = False
-    g += [f"G00 Z{safe_z:.3f}", "M05", "G00 X0 Y0", "%"]
+    for strokes, depth in jobs:
+        if not strokes:
+            continue
+        n_pass = passes if depth > 0 else 1
+        for p_i in range(1, n_pass + 1):
+            z = -depth * p_i / n_pass
+            down = False
+            for s in strokes:
+                x, y = s[0]
+                # Schließt der Strich direkt an, bleibt der Fräser unten
+                if not (down and math.dist(pos, (x, y)) < 0.01):
+                    if down:
+                        g.append(f"G00 Z{safe_z:.3f}")
+                    g.append(f"G00 X{x:.3f} Y{y:.3f}")
+                    g.append(f"G01 Z{z:.3f} F{plunge:.0f}")
+                    travel += math.dist(pos, (x, y))
+                    plunges += 1
+                    down = True
+                for i, ((ax, ay), (bx, by)) in enumerate(zip(s, s[1:])):
+                    g.append(f"G01 X{bx:.3f} Y{by:.3f}" + (f" F{feed:.0f}" if i == 0 else ""))
+                    cut_len += math.hypot(bx - ax, by - ay)
+                pos = s[-1]
+            g.append(f"G00 Z{safe_z:.3f}")
+    g += ["M05", "G00 X0 Y0", "%"]
     # grobe Zeitschätzung (Eilgang ~ 1800 mm/min)
-    minutes = cut_len / feed + travel / 1800 + plunges * (2 * (safe_z + depth)) / plunge
+    minutes = cut_len / feed + travel / 1800 + plunges * (2 * safe_z + 0.5) / plunge
     return "\n".join(g) + "\n", minutes
 
+
+# ---------------------------------------------------------------- Drucker
 
 def list_printers():
     if not win32print:
@@ -177,59 +271,182 @@ def send_raw(printer, data):
         win32print.ClosePrinter(h)
 
 
+# ---------------------------------------------------------------- Dateien (Logo, Kontur, Vorlagen)
+
+ASSETS = ("logo", "plate")
+
+
+def load_json(name, default=None):
+    try:
+        return json.loads((DATA / name).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return default
+
+
+def save_json(name, obj):
+    DATA.mkdir(exist_ok=True)
+    (DATA / name).write_text(json.dumps(obj), encoding="utf-8")
+
+
+def load_asset(kind):
+    a = load_json(f"{kind}.json")
+    return a if a and a.get("strokes") else None
+
+
+def presets():
+    return DEFAULT_PRESETS + load_json("presets.json", [])
+
+
+# ---------------------------------------------------------------- Aufbau des Schilds
+
+def num(p, key, default, lo=None, hi=None):
+    try:
+        v = float(p.get(key, default))
+    except (TypeError, ValueError):
+        v = default
+    if not math.isfinite(v):
+        v = default
+    if lo is not None:
+        v = max(lo, v)
+    if hi is not None:
+        v = min(hi, v)
+    return v
+
+
+def build(p):
+    text = str(p.get("text", ""))[:MAX_CHARS]
+    font = p.get("font", "futural")
+    align = p.get("align") if p.get("align") in ("left", "center", "right") else "center"
+    height = num(p, "height", 10, 0.5, 100)
+    depth = num(p, "depth", 0.2, 0.01, 5)
+    logo_depth = num(p, "logo_depth", depth, 0.01, 5)
+    safe_z = num(p, "safe_z", 2, 0.5, 30)
+    feed = num(p, "feed", 240, 10, 1800)
+    plunge = num(p, "plunge", 60, 5, 1800)
+    rpm = num(p, "rpm", 7000, 3000, 7000)
+    passes = int(num(p, "passes", 1, 1, 10))
+    line_w = num(p, "line_w", 0.3, 0.05, 5)
+    mode = p.get("mode") if p.get("mode") in ("engrave", "air", "outline") else "engrave"
+    side = num(p, "margin_side", 3, 0)
+    bottom = num(p, "text_bottom", 3, 0)
+    top = num(p, "margin_top", 3, 0)
+    gap = num(p, "logo_gap", 3, 0)
+    warnings = []
+
+    # --- Werkstück
+    contour = load_asset("plate") if p.get("plate_src") == "file" else None
+    if contour:
+        plate_strokes = contour["strokes"]
+        _, _, pw, ph = bbox_of(plate_strokes)  # beim Import auf 0/0 verschoben
+        plate = {"kind": "file", "strokes": plate_strokes, "w": pw, "h": ph}
+    else:
+        pw = num(p, "plate_w", 70, 5, 1000)
+        ph = num(p, "plate_h", 50, 5, 1000)
+        pr = num(p, "plate_r", 3, 0, 500)
+        plate_strokes = rounded_rect(pw, ph, pr)
+        plate = {"kind": "rect", "w": pw, "h": ph, "r": pr}
+    if pw > WORK_X or ph > WORK_Y:
+        warnings.append(f"Werkstück ({pw:.0f} × {ph:.0f} mm) ist größer als der Arbeitsbereich der SRM-20 "
+                        f"({WORK_X:.0f} × {WORK_Y:.0f} mm).")
+
+    # --- Text: zentriert, Unterkante "bottom" mm über der Werkstückkante
+    text_s = text_to_strokes(text, height, font, align=align) if text.strip() else []
+    tb = bbox_of(text_s)
+    real_h = height
+    if tb and p.get("autoshrink", True):
+        avail = pw - 2 * side
+        tw = tb[2] - tb[0]
+        if tw > avail > 0:
+            real_h = height * avail / tw
+            text_s = text_to_strokes(text, real_h, font, align=align)
+            tb = bbox_of(text_s)
+            warnings.append(f"Text zu breit – Schrifthöhe automatisch auf {real_h:.1f} mm verkleinert.")
+    if tb:
+        text_s = transform(text_s, 1, pw / 2 - (tb[0] + tb[2]) / 2, bottom - tb[1])
+        tb = bbox_of(text_s)
+    miss = missing_chars(text, font)
+    if miss:
+        warnings.append("Nicht in der Schrift enthalten (wird ausgelassen): " + " ".join(miss))
+
+    # --- Logo: in den freien Bereich über dem Text eingepasst
+    logo_s, logo_area = [], None
+    asset = load_asset("logo") if p.get("logo_on", True) else None
+    if asset:
+        y_lo = tb[3] + gap if tb else bottom
+        area = (side, y_lo, pw - side, ph - top)
+        aw, ah = area[2] - area[0], area[3] - area[1]
+        lb = bbox_of(asset["strokes"])
+        if aw > 1 and ah > 1:
+            lw, lh = max(lb[2] - lb[0], 1e-6), max(lb[3] - lb[1], 1e-6)
+            k = min(aw / lw, ah / lh) * num(p, "logo_scale", 100, 1, 1000) / 100
+            cx = (area[0] + area[2]) / 2 + num(p, "logo_dx", 0)
+            cy = (area[1] + area[3]) / 2 + num(p, "logo_dy", 0)
+            logo_s = transform(asset["strokes"], k, cx - (lb[0] + lb[2]) / 2 * k, cy - (lb[1] + lb[3]) / 2 * k)
+            if p.get("logo_fill"):
+                fill = hatch(logo_s, num(p, "fill_step", line_w * 0.8, 0.05, 10))
+                if not fill:
+                    warnings.append("Logo hat keine geschlossenen Flächen – Füllen nicht möglich.")
+                logo_s += fill
+        else:
+            warnings.append("Kein Platz für das Logo – Text kleiner machen oder Ränder verringern.")
+        logo_area = area
+
+    # --- Randprüfung
+    pts = [pt for s in text_s + logo_s for pt in s]
+    if pts:
+        worst = min(edge_distance(pt, plate) for pt in pts)
+        if worst < 0:
+            warnings.append("Achtung: Teile der Gravur liegen AUSSERHALB des Werkstücks!")
+        elif worst < EDGE_MIN:
+            warnings.append(f"Gravur liegt nur {worst:.2f} mm vom Werkstückrand entfernt.")
+
+    # --- G-Code
+    text_o = optimize_order(text_s)
+    logo_o = optimize_order(logo_s, text_o[-1][-1] if text_o else (0.0, 0.0))
+    if mode == "air":  # Luftschnitt: Fräser fährt 1 mm ÜBER der Oberfläche
+        gcode, minutes = make_gcode([(text_o, -1.0), (logo_o, -1.0)], max(safe_z, 3), feed, plunge, rpm, 1)
+    elif mode == "outline":  # nur Werkstückumriss 1 mm über der Oberfläche abfahren
+        gcode, minutes = make_gcode([(plate_strokes, -1.0)], max(safe_z, 3), feed, plunge, rpm, 1)
+    else:
+        gcode, minutes = make_gcode([(text_o, depth), (logo_o, logo_depth)], safe_z, feed, plunge, rpm, passes)
+
+    return dict(text=text_s, logo=logo_s, plate=plate_strokes, plate_size=(pw, ph), logo_area=logo_area,
+                text_height=real_h if tb else None, text_bbox=tb, gcode=gcode, minutes=minutes,
+                warnings=warnings, has_work=bool(text_s or logo_s), mode=mode)
+
+
 # ---------------------------------------------------------------- Web
 
 app = Flask(__name__)
+app.config["MAX_CONTENT_LENGTH"] = 25 * 1024 * 1024
 
 
-def build(params):
-    text = str(params.get("text", ""))[:MAX_CHARS]
-    height = max(0.5, float(params.get("height", 5)))
-    depth = max(0.01, float(params.get("depth", 0.2)))
-    safe_z = max(0.5, float(params.get("safe_z", 2)))
-    feed = max(10, float(params.get("feed", 240)))
-    plunge = max(5, float(params.get("plunge", 60)))
-    rpm = max(3000, min(7000, float(params.get("rpm", 7000))))
-    passes = max(1, min(10, int(params.get("passes", 1))))
-    font = params.get("font", "futural")
-    align = params.get("align", "left") if params.get("align") in ("left", "center", "right") else "left"
-    anchor = params.get("anchor", "bottomleft")
-    air = bool(params.get("air", False))
-
-    strokes = text_to_strokes(text, height, font, align=align)
-    strokes, bbox = place(strokes, anchor)
-    strokes = optimize_order(strokes)
-    if air:  # Luftschnitt: Fräser fährt 1 mm ÜBER der Oberfläche (Z+1)
-        gcode, minutes = make_gcode(strokes, -1.0, max(safe_z, 3), feed, plunge, rpm, 1)
-    else:
-        gcode, minutes = make_gcode(strokes, depth, safe_z, feed, plunge, rpm, passes)
-
-    warnings = []
-    w, h = bbox[2] - bbox[0], bbox[3] - bbox[1]
-    if w > WORK_X or h > WORK_Y:
-        warnings.append(f"Text ({w:.1f} × {h:.1f} mm) ist größer als der Arbeitsbereich der SRM-20.")
-    missing = sorted({c for c in text if c not in "\n ß" and c not in UMLAUTS
-                      and not list(get_font(font)[0].strokes_for_text(c))})
-    if missing:
-        warnings.append("Nicht in der Schrift enthalten (wird ausgelassen): " + " ".join(missing))
-    return dict(strokes=strokes, bbox=bbox, gcode=gcode, minutes=minutes, warnings=warnings, air=air)
+def rnd(strokes):
+    return [[(round(x, 3), round(y, 3)) for x, y in s] for s in strokes]
 
 
 @app.get("/")
 def index():
-    return PAGE
+    return send_file(BASE / "index.html")
 
 
 @app.get("/api/info")
 def info():
-    return jsonify(fonts=FONTS, printers=list_printers(), windows=bool(win32print))
+    assets = {}
+    for kind in ASSETS:
+        a = load_asset(kind)
+        assets[kind] = {"name": a["name"], "notes": a.get("notes", [])} if a else None
+    return jsonify(fonts=FONTS, printers=list_printers(), windows=bool(win32print),
+                   presets=presets(), assets=assets)
 
 
 @app.post("/api/preview")
 def preview():
     r = build(request.json or {})
-    return jsonify(strokes=r["strokes"], bbox=r["bbox"], minutes=r["minutes"],
-                   warnings=r["warnings"], lines=r["gcode"].count("\n"), gcode=r["gcode"])
+    return jsonify(text=rnd(r["text"]), logo=rnd(r["logo"]), plate=rnd(r["plate"]),
+                   plate_size=r["plate_size"], logo_area=r["logo_area"], text_height=r["text_height"],
+                   text_bbox=r["text_bbox"], minutes=r["minutes"], warnings=r["warnings"],
+                   lines=r["gcode"].count("\n"), gcode=r["gcode"])
 
 
 @app.post("/api/send")
@@ -241,8 +458,8 @@ def send():
     if printer not in list_printers():
         return jsonify(ok=False, error="Drucker nicht gefunden."), 400
     r = build(p)
-    if not r["strokes"]:
-        return jsonify(ok=False, error="Kein Text."), 400
+    if r["mode"] != "outline" and not r["has_work"]:
+        return jsonify(ok=False, error="Nichts zu gravieren."), 400
     try:
         send_raw(printer, r["gcode"])
     except Exception as e:  # Spooler-Fehler an die Oberfläche geben
@@ -250,122 +467,58 @@ def send():
     return jsonify(ok=True, minutes=r["minutes"])
 
 
-PAGE = r"""<!doctype html>
-<html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>SRM-20 Gravur</title>
-<style>
-:root{--bg:#f4f3ef;--card:#fff;--ink:#1c1c1a;--mut:#6b6a64;--line:#dcdad3;--acc:#c2410c;--ok:#15803d;--warn:#b45309}
-*{box-sizing:border-box}body{margin:0;font:15px/1.45 system-ui,Segoe UI,sans-serif;background:var(--bg);color:var(--ink)}
-header{padding:18px 24px;border-bottom:1px solid var(--line);display:flex;align-items:baseline;gap:14px}
-header h1{font-size:19px;margin:0}header span{color:var(--mut);font-size:13px}
-main{display:grid;grid-template-columns:340px 1fr;gap:20px;padding:20px 24px;max-width:1300px}
-@media(max-width:820px){main{grid-template-columns:1fr}}
-.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:16px}
-label{display:block;font-size:12px;color:var(--mut);margin:10px 0 3px;text-transform:uppercase;letter-spacing:.04em}
-textarea,input,select{width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:6px;font:inherit;background:#fff}
-textarea{font-size:20px;min-height:90px;resize:vertical}
-.row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
-.chk{display:flex;gap:8px;align-items:center;margin-top:12px;font-size:14px}.chk input{width:auto}
-button{font:inherit;border:0;border-radius:7px;padding:11px 14px;cursor:pointer}
-.go{background:var(--acc);color:#fff;width:100%;font-weight:600;font-size:16px;margin-top:16px}
-.go:disabled{opacity:.45;cursor:not-allowed}
-.sec{background:transparent;border:1px solid var(--line);margin-top:8px;width:100%}
-#svgwrap{background:#fbfaf7;border:1px solid var(--line);border-radius:8px;height:420px;position:relative}
-svg{width:100%;height:100%}
-.stats{display:flex;gap:22px;flex-wrap:wrap;margin:12px 0 4px;font-size:14px}.stats b{font-size:17px}
-#warn{color:var(--warn);font-size:14px}#msg{margin-top:10px;font-size:14px}
-details{margin-top:12px}pre{max-height:260px;overflow:auto;background:#1c1c1a;color:#e8e6df;padding:10px;border-radius:6px;font-size:12px}
-.hint{font-size:12.5px;color:var(--mut);margin-top:12px;line-height:1.5}
-</style></head><body>
-<header><h1>SRM-20 Gravur</h1><span>Text → G-Code → Fräse</span></header>
-<main>
-<section class="card">
-  <label>Text</label>
-  <textarea id="text" placeholder="Text eingeben…">Hallo Welt</textarea>
-  <label>Schrift</label><select id="font"></select>
-  <div class="row">
-    <div><label>Höhe (mm)</label><input id="height" type="number" value="5" step="0.5" min="0.5"></div>
-    <div><label>Tiefe (mm)</label><input id="depth" type="number" value="0.2" step="0.05" min="0.01"></div>
-  </div>
-  <div class="row">
-    <div><label>Ausrichtung</label><select id="align"><option value="left">Links</option><option value="center">Mitte</option><option value="right">Rechts</option></select></div>
-    <div><label>Nullpunkt ist</label><select id="anchor"><option value="bottomleft">Links unten</option><option value="center">Textmitte</option></select></div>
-  </div>
-  <details><summary style="cursor:pointer;margin-top:12px">Fräsparameter</summary>
-    <div class="row">
-      <div><label>Vorschub (mm/min)</label><input id="feed" type="number" value="240"></div>
-      <div><label>Eintauchen (mm/min)</label><input id="plunge" type="number" value="60"></div>
-    </div>
-    <div class="row">
-      <div><label>Drehzahl (U/min)</label><input id="rpm" type="number" value="7000" max="7000"></div>
-      <div><label>Sicherheits-Z (mm)</label><input id="safe_z" type="number" value="2" step="0.5"></div>
-    </div>
-    <label>Durchgänge</label><input id="passes" type="number" value="1" min="1" max="10">
-  </details>
-  <label class="chk"><input type="checkbox" id="air"> Luftschnitt (1 mm über Oberfläche, zum Testen)</label>
-  <label>Fräse (Windows-Drucker)</label><select id="printer"></select>
-  <button class="go" id="send">An Fräse senden</button>
-  <button class="sec" id="dl">G-Code herunterladen (.nc)</button>
-  <div id="msg"></div>
-  <p class="hint">Vorher in VPanel: Befehlssatz <b>NC-Code</b>, X/Y-Nullpunkt und Z-Nullpunkt auf der Werkstückoberfläche setzen. Abbrechen über VPanel oder die VIEW-Taste an der Maschine.</p>
-</section>
-<section class="card">
-  <div id="svgwrap"><svg id="svg"></svg></div>
-  <div class="stats"><div>Größe <b id="size">–</b></div><div>Dauer ca. <b id="time">–</b></div><div>Zeilen <b id="lines">–</b></div></div>
-  <div id="warn"></div>
-  <details><summary style="cursor:pointer">G-Code ansehen</summary><pre id="code"></pre></details>
-</section>
-</main>
-<script>
-const $=id=>document.getElementById(id);
-const ids=["text","font","height","depth","align","anchor","feed","plunge","rpm","safe_z","passes","air"];
-let last=null,timer=null;
-function params(){const p={};ids.forEach(i=>{const e=$(i);p[i]=e.type==="checkbox"?e.checked:e.value});p.printer=$("printer").value;return p}
-async function info(){
-  const r=await (await fetch("/api/info")).json();
-  $("font").innerHTML=Object.entries(r.fonts).map(([k,v])=>`<option value="${k}">${v}</option>`).join("");
-  if(r.printers.length){$("printer").innerHTML=r.printers.map(n=>`<option>${n}</option>`).join("")}
-  else{$("printer").innerHTML="<option value=''>keine Drucker gefunden</option>";$("send").disabled=true;
-    if(!r.windows)$("msg").textContent="Senden nur unter Windows mit pywin32 möglich – Vorschau und Download funktionieren."}
-  update();
-}
-function schedule(){clearTimeout(timer);timer=setTimeout(update,200)}
-async function update(){
-  const r=await (await fetch("/api/preview",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(params())})).json();
-  last=r;draw(r);
-  const [x0,y0,x1,y1]=r.bbox;
-  $("size").textContent=r.strokes.length?`${(x1-x0).toFixed(1)} × ${(y1-y0).toFixed(1)} mm`:"–";
-  const s=Math.round(r.minutes*60);$("time").textContent=r.strokes.length?(s<60?s+" s":Math.floor(s/60)+" min "+(s%60)+" s"):"–";
-  $("lines").textContent=r.lines;$("code").textContent=r.gcode;
-  $("warn").innerHTML=r.warnings.map(w=>"⚠ "+w).join("<br>");
-}
-function draw(r){
-  const svg=$("svg");const [x0,y0,x1,y1]=r.bbox;
-  const w=Math.max(x1-x0,1),h=Math.max(y1-y0,1),m=Math.max(w,h)*0.12+2;
-  const vx=Math.min(x0,0)-m,vy=-Math.max(y1,0)-m,vw=Math.max(x1,0)-Math.min(x0,0)+2*m,vh=Math.max(y1,0)-Math.min(y0,0)+2*m;
-  svg.setAttribute("viewBox",`${vx} ${vy} ${vw} ${vh}`);
-  const sw=Math.max(vw,vh)/300,tool=Math.max(+$("height").value*0.06,sw);
-  let out=`<line x1="${vx}" y1="0" x2="${vx+vw}" y2="0" stroke="#c9c6bd" stroke-width="${sw}"/>
-  <line x1="0" y1="${vy}" x2="0" y2="${vy+vh}" stroke="#c9c6bd" stroke-width="${sw}"/>
-  <circle cx="0" cy="0" r="${sw*3}" fill="#c2410c"/>`;
-  out+=`<g fill="none" stroke="#1c1c1a" stroke-width="${tool}" stroke-linecap="round" stroke-linejoin="round">`;
-  for(const s of r.strokes)out+=`<polyline points="${s.map(p=>p[0]+","+(-p[1])).join(" ")}"/>`;
-  svg.innerHTML=out+"</g>";
-}
-ids.forEach(i=>{$(i).addEventListener("input",schedule);$(i).addEventListener("change",schedule)});
-$("dl").onclick=()=>{if(!last)return;const a=document.createElement("a");
-  a.href=URL.createObjectURL(new Blob([last.gcode],{type:"text/plain"}));a.download="gravur.nc";a.click()};
-$("send").onclick=async()=>{
-  const p=params();if(!p.text.trim())return;
-  const what=p.air?"LUFTSCHNITT":"GRAVUR";
-  if(!confirm(`${what} starten?\n\n"${p.text}"\nTiefe: ${p.air?"+1 mm (Luft)":p.depth+" mm"}\n\nNullpunkt gesetzt? NC-Code-Modus aktiv?`))return;
-  $("send").disabled=true;$("msg").textContent="Sende…";
-  const r=await (await fetch("/api/send",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(p)})).json();
-  $("msg").innerHTML=r.ok?`<span style="color:var(--ok)">✓ An Fräse gesendet.</span>`:`<span style="color:var(--acc)">Fehler: ${r.error}</span>`;
-  setTimeout(()=>$("send").disabled=false,3000);
-};
-info();
-</script></body></html>"""
+@app.post("/api/upload/<kind>")
+def upload(kind):
+    if kind not in ASSETS:
+        return jsonify(ok=False, error="Unbekannter Typ."), 400
+    f = request.files.get("file")
+    if not f or not f.filename:
+        return jsonify(ok=False, error="Keine Datei."), 400
+    try:
+        strokes, notes = importer.load(f.filename, f.read())
+    except importer.ImportFailed as e:
+        return jsonify(ok=False, error=str(e)), 400
+    if kind == "plate":
+        closed = [s for s in strokes if is_closed(s)]
+        if not closed:
+            return jsonify(ok=False, error="Keine geschlossene Kontur gefunden – der Werkstückumriss "
+                                           "muss eine geschlossene Linie sein."), 400
+        if len(closed) < len(strokes):
+            notes.append(f"{len(strokes) - len(closed)} offene Linien ignoriert.")
+        strokes = closed
+    x0, y0, x1, y1 = bbox_of(strokes)
+    strokes = transform(strokes, 1, -x0, -y0)  # linke untere Ecke -> 0/0
+    save_json(f"{kind}.json", {"name": f.filename, "strokes": rnd(strokes), "notes": notes})
+    return jsonify(ok=True, name=f.filename, size=(round(x1 - x0, 2), round(y1 - y0, 2)), notes=notes)
+
+
+@app.delete("/api/upload/<kind>")
+def remove_upload(kind):
+    if kind in ASSETS:
+        (DATA / f"{kind}.json").unlink(missing_ok=True)
+    return jsonify(ok=True)
+
+
+@app.post("/api/presets")
+def add_preset():
+    p = request.json or {}
+    name = re.sub(r"\s+", " ", str(p.get("name", ""))).strip()[:60]
+    if not name:
+        return jsonify(ok=False, error="Name fehlt."), 400
+    if any(x["name"] == name for x in DEFAULT_PRESETS):
+        return jsonify(ok=False, error="Name ist schon vergeben."), 400
+    own = [x for x in load_json("presets.json", []) if x["name"] != name]
+    own.append({"name": name, "w": num(p, "w", 70, 5, 1000), "h": num(p, "h", 50, 5, 1000),
+                "r": num(p, "r", 3, 0, 500)})
+    save_json("presets.json", own)
+    return jsonify(ok=True, presets=presets())
+
+
+@app.delete("/api/presets")
+def del_preset():
+    name = request.args.get("name", "")
+    save_json("presets.json", [x for x in load_json("presets.json", []) if x["name"] != name])
+    return jsonify(ok=True, presets=presets())
 
 
 if __name__ == "__main__":

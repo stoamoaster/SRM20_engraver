@@ -1,3 +1,5 @@
 flask
 Hershey-Fonts
 pywin32
+ezdxf
+svgelements
