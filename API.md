@@ -113,9 +113,13 @@ bis Höhe − `margin_top`. Das Logo wird mit gleichem Seitenverhältnis eingepa
 | `rpm` | Zahl | 7000 | 3000–7000 | Spindeldrehzahl |
 | `safe_z` | Zahl | 2 | 0,5–30 | Sicherheitshöhe für Leerfahrten. Bei `air`/`outline` mindestens 3. |
 | `wcs` | Text | `"G54"` | `G54`…`G59` | Koordinatensystem, in dem der Nullpunkt in VPanel gesetzt ist |
-| `park` | bool | `true` | | Am Ende in die VIEW-/Parkposition fahren: erst `G53 Z0` (Z ganz hoch), dann `G53 X… Y…`. Bei `false` fährt die Fräse zum Werkstück-Nullpunkt (`G00 X0 Y0`) zurück. |
-| `park_x` | Zahl | 0 | 0–203,2 | Parkposition X in **Maschinen**koordinaten |
-| `park_y` | Zahl | 152,4 | 0–152,4 | Parkposition Y in **Maschinen**koordinaten. 152,4 = Werkzeug ganz hinten, also Tisch ganz vorne. |
+| `park` | bool | `true` | | Am Ende in die VIEW-/Parkposition fahren: erst `G00 Z…`, dann `G00 X… Y…`. Bei `false` fährt die Fräse zum Werkstück-Nullpunkt (`G00 X0 Y0`) zurück. |
+| `park_x` | Zahl | 33,7 | −203,2–203,2 | Parkposition X im gewählten Koordinatensystem (`wcs`) |
+| `park_y` | Zahl | 121,8 | −152,4–152,4 | Parkposition Y im gewählten Koordinatensystem |
+| `park_z` | Zahl | 57,5 | 0–70 | Parkposition Z im gewählten Koordinatensystem. Nie tiefer als `safe_z`. |
+
+Die Standardwerte sind die VIEW-Position der SRM-20, gemessen im G54-System. Weil sie sich auf den
+Werkstück-Nullpunkt beziehen, verschieben sie sich mit ihm. Bei einem stark anderen Nullpunkt die Werte anpassen.
 | `line_w` | Zahl | 0,3 | 0,05–5 | Linienbreite. Nur für die Vorschau und als Standard für `fill_step`. |
 
 ---

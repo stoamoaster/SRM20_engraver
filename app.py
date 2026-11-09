@@ -372,16 +372,16 @@ def optimize_order(strokes, start=(0.0, 0.0)):
 # ---------------------------------------------------------------- G-Code
 
 WCS = ("G54", "G55", "G56", "G57", "G58", "G59")
-# VIEW-/Parkposition in Maschinenkoordinaten (Nullpunkt oben vorne links):
-# X links, Y ganz hinten -> Tisch kommt nach vorne
-PARK_X, PARK_Y = 0.0, WORK_Y
+# VIEW-/Parkposition in WERKSTÜCKkoordinaten (gewähltes System, z. B. G54),
+# an der SRM-20 gemessen: dort steht die Fräse nach Drücken der VIEW-Taste
+PARK_X, PARK_Y, PARK_Z = 33.7, 121.8, 57.5
 
 
 def make_gcode(jobs, safe_z, feed, plunge, rpm, passes, wcs="G54", park=None):
-    """park: None = am Ende zum Werkstück-Nullpunkt (X0 Y0) fahren.
-    (x, y) = Parkposition in MASCHINENkoordinaten: erst Z ganz nach oben (G53 Z0),
-    dann X/Y. Maschinen-Nullpunkt der Roland = oben, vorne links."""
     """jobs: Liste von (strokes, tiefe). Tiefe < 0 = über der Oberfläche (Luftschnitt).
+
+    park: None = am Ende zum Werkstück-Nullpunkt (X0 Y0) fahren.
+    (x, y, z) = Parkposition im Werkstück-Koordinatensystem: erst Z hoch, dann X/Y.
 
     wcs: Werkstück-Koordinatensystem, in dem in VPanel der Nullpunkt gesetzt wurde.
     Ohne ausdrückliche Auswahl kann die SRM-20 in Maschinenkoordinaten fahren
@@ -426,8 +426,8 @@ def make_gcode(jobs, safe_z, feed, plunge, rpm, passes, wcs="G54", park=None):
             g.append(f"G00 Z{safe_z:.3f}")
     if park:
         g += ["M05",
-              "G53 Z0.000",                               # Z ganz nach oben
-              f"G53 X{park[0]:.3f} Y{park[1]:.3f}",      # dann X/Y in die VIEW-/Parkposition
+              f"G00 Z{max(park[2], safe_z):.3f}",       # zuerst nur Z nach oben
+              f"G00 X{park[0]:.3f} Y{park[1]:.3f}",      # dann X/Y in die VIEW-/Parkposition
               "%"]
     else:
         g += ["M05", "G00 X0.000 Y0.000", "%"]
@@ -523,8 +523,8 @@ def build(p):
     line_w = num(p, "line_w", 0.3, 0.05, 5)
     mode = p.get("mode") if p.get("mode") in ("engrave", "air", "outline") else "engrave"
     wcs = p.get("wcs") if p.get("wcs") in WCS else "G54"
-    park = ((num(p, "park_x", PARK_X, 0, WORK_X), num(p, "park_y", PARK_Y, 0, WORK_Y))
-            if flag(p, "park", True) else None)
+    park = ((num(p, "park_x", PARK_X, -WORK_X, WORK_X), num(p, "park_y", PARK_Y, -WORK_Y, WORK_Y),
+             num(p, "park_z", PARK_Z, 0, 70)) if flag(p, "park", True) else None)
     side = num(p, "margin_side", 3, 0)
     bottom = num(p, "text_bottom", 3, 0)
     top = num(p, "margin_top", 3, 0)

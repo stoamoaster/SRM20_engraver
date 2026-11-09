@@ -119,13 +119,14 @@ pre{max-height:260px;overflow:auto;background:#1c1c1a;color:#e8e6df;padding:10px
       <div><label>Sicherheits-Z (mm)</label><input id="safe_z" type="number" value="2" step="0.5"></div>
     </div>
     <label>Durchgänge</label><input id="passes" type="number" value="1" min="1" max="10">
-    <div class="row">
-      <div><label>Parkposition X</label><input id="park_x" type="number" value="0" step="1" min="0" max="203.2"></div>
-      <div><label>Parkposition Y</label><input id="park_y" type="number" value="152.4" step="1" min="0" max="152.4"></div>
+    <div class="row3">
+      <div><label>Park X</label><input id="park_x" type="number" value="33.7" step="0.1"></div>
+      <div><label>Park Y</label><input id="park_y" type="number" value="121.8" step="0.1"></div>
+      <div><label>Park Z</label><input id="park_z" type="number" value="57.5" step="0.1" min="0"></div>
     </div>
-    <p class="note">Maschinenkoordinaten in mm (Nullpunkt der Maschine: oben, vorne links). Y 152,4 = Werkzeug ganz hinten, Tisch ganz vorne.</p>
+    <p class="note">VIEW-/Parkposition in mm im gewählten Koordinatensystem (G54 …), also bezogen auf den gesetzten Nullpunkt. Standard = VIEW-Position der SRM-20.</p>
   </details>
-  <label class="chk"><input type="checkbox" id="park" checked> Am Ende in VIEW-Position fahren (erst Z ganz hoch, dann X/Y)</label>
+  <label class="chk"><input type="checkbox" id="park" checked> Am Ende in VIEW-Position fahren (erst Z hoch, dann X/Y)</label>
   <label>Koordinatensystem (wie in VPanel)</label>
   <select id="wcs"><option>G54</option><option>G55</option><option>G56</option><option>G57</option><option>G58</option><option>G59</option></select>
   <label>Modus</label>
@@ -155,17 +156,18 @@ pre{max-height:260px;overflow:auto;background:#1c1c1a;color:#e8e6df;padding:10px
 const $=id=>document.getElementById(id);
 const ids=["plate_src","plate_w","plate_h","plate_r","text","font","height","text_bottom","width_pct","letter_spacing","margin_side","align","autoshrink","smooth",
   "logo_on","logo_gap","margin_top","logo_scale","logo_dx","logo_dy","logo_fill","fill_step","logo_depth",
-  "depth","line_w","feed","plunge","rpm","safe_z","passes","park_x","park_y","park","wcs","mode"];
+  "depth","line_w","feed","plunge","rpm","safe_z","passes","park_x","park_y","park_z","park","wcs","mode"];
 const KEY="srm20-gravur-v2";
 let last=null,timer=null,presets=[],seq=0;
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 
 function params(){const p={};ids.forEach(i=>{const e=$(i);p[i]=e.type==="checkbox"?e.checked:e.value});p.printer=$("printer").value;return p}
-function store(){try{localStorage.setItem(KEY,JSON.stringify({...params(),fontv:2}))}catch(e){}}
+function store(){try{localStorage.setItem(KEY,JSON.stringify({...params(),fontv:2,parkv:2}))}catch(e){}}
 function restore(){
   let s=null;try{s=JSON.parse(localStorage.getItem(KEY)||"null")}catch(e){}
   if(!s)return;
   if(!s.fontv){s.font="relief";s.fontv=2} // einmalig auf die neue, feinere Schrift umstellen
+  if(!s.parkv){delete s.park_x;delete s.park_y;delete s.park_z} // alte Parkposition (Maschinenkoordinaten) verwerfen
   $("font").dataset.saved=s.font||"";ids.forEach(i=>{if(i in s&&i!=="mode"){const e=$(i);if(e.type==="checkbox")e.checked=!!s[i];else e.value=s[i]}});
 }
 async function api(url,opt){const r=await fetch(url,opt);return r.json()}

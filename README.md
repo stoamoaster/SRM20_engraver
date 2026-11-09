@@ -59,8 +59,9 @@ Abbrechen: in VPanel oder mit der VIEW-Taste an der Maschine.
   Bei ihnen macht „Rundungen glätten“ die Kurven runder.
 - „Schriftbreite %“ streckt die Buchstaben waagrecht, z. B. für ein breiteres T.
   „Zeichenabstand“ zieht den Text auseinander.
-- Am Ende fährt die Fräse in die **VIEW-Position**: erst Z ganz nach oben, dann X/Y (Werkzeug hinten,
-  Tisch vorne). Die Position ist unter „Fräsparameter“ einstellbar oder lässt sich abschalten.
+- Am Ende fährt die Fräse in die **VIEW-Position**: erst Z hoch, dann X/Y. Standard ist
+  X 33,7 / Y 121,8 / Z 57,5 im G54-System. Alle drei Achsen sind unter „Fräsparameter“ einstellbar,
+  der Schalter lässt sich auch abschalten. Die Werte beziehen sich auf den Werkstück-Nullpunkt.
 - Umlaute werden aus Grundbuchstabe + Punkten gebaut, ß wird zu „ss“.
 - Zeichen, die die Schrift nicht kennt (z. B. €), werden ausgelassen und angezeigt.
 - Andere Geräte im WLAN können über http://<IP-des-PCs>:5000 gravieren
