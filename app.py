@@ -228,7 +228,13 @@ def make_gcode(jobs, safe_z, feed, plunge, rpm, passes, wcs="G54"):
          "G40 G49 G80",  # Radius-/Längenkorrektur und Zyklen aus
          wcs,            # Nullpunkt aus VPanel verwenden
          f"G00 Z{safe_z:.3f}",
-         f"M03 S{int(rpm)}"]
+         # Drehzahl laut Roland-Handbuch als ganze Zahl OHNE Dezimalpunkt (>= 100 = U/min),
+         # erst setzen, dann Spindel mit M03 starten
+         f"S{int(round(rpm))}",
+         "M03"]
+    # Vorschub IMMER mit Dezimalpunkt: "F240" würde als 0,240 mm/min gelesen
+    # (konventionelle Interpretation, Einheit 0,001 mm/min) -> Fräse fährt mit Minimalspeed
+    f_feed, f_plunge = f"F{feed:.1f}", f"F{plunge:.1f}"
     cut_len = travel = 0.0
     pos = (0.0, 0.0)
     plunges = 0
@@ -246,16 +252,16 @@ def make_gcode(jobs, safe_z, feed, plunge, rpm, passes, wcs="G54"):
                     if down:
                         g.append(f"G00 Z{safe_z:.3f}")
                     g.append(f"G00 X{x:.3f} Y{y:.3f}")
-                    g.append(f"G01 Z{z:.3f} F{plunge:.0f}")
+                    g.append(f"G01 Z{z:.3f} {f_plunge}")
                     travel += math.dist(pos, (x, y))
                     plunges += 1
                     down = True
                 for i, ((ax, ay), (bx, by)) in enumerate(zip(s, s[1:])):
-                    g.append(f"G01 X{bx:.3f} Y{by:.3f}" + (f" F{feed:.0f}" if i == 0 else ""))
+                    g.append(f"G01 X{bx:.3f} Y{by:.3f}" + (f" {f_feed}" if i == 0 else ""))
                     cut_len += math.hypot(bx - ax, by - ay)
                 pos = s[-1]
             g.append(f"G00 Z{safe_z:.3f}")
-    g += ["M05", "G00 X0 Y0", "%"]
+    g += ["M05", "G00 X0.000 Y0.000", "%"]
     # grobe Zeitschätzung (Eilgang ~ 1800 mm/min)
     minutes = cut_len / feed + travel / 1800 + plunges * (2 * safe_z + 0.5) / plunge
     return "\n".join(g) + "\n", minutes
