@@ -7,7 +7,10 @@ Text eingeben, Vorschau ansehen, direkt an die Roland SRM-20 senden.
 2. In **VPanel** → Setup: Befehlssatz auf **NC-Code** stellen.
    Achtung: G-Code im RML-1-Modus lässt die Maschine hängen.
 3. Ordner irgendwohin kopieren, `start.bat` doppelklicken.
-   Installiert die Pakete und öffnet http://localhost:5000
+   Beim ersten Start wird eine virtuelle Umgebung (`.venv`) im Ordner angelegt und die
+   Pakete werden dort installiert, nicht global. Danach öffnet sich http://localhost:5000
+   Pakete werden nur neu installiert, wenn sich `requirements.txt` ändert.
+   Bei Problemen einfach den Ordner `.venv` löschen, beim nächsten Start wird er neu erstellt.
 
 ## Pro Gravur
 1. Werkstück einspannen, in VPanel X/Y-Nullpunkt und **Z-Nullpunkt auf der Oberfläche** setzen.
