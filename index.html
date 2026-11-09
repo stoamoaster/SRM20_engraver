@@ -71,6 +71,10 @@ pre{max-height:260px;overflow:auto;background:#1c1c1a;color:#e8e6df;padding:10px
     <div><label>Abstand unten</label><input id="text_bottom" type="number" value="3" step="0.5" min="0"></div>
   </div>
   <div class="row">
+    <div><label>Zeichenabstände</label><select id="spacing_mode"><option value="optical" title="Abstände nach der Form der Buchstaben ausgleichen">optisch</option><option value="font" title="Abstände und Kerning der Schrift">aus Schrift</option></select></div>
+    <div><label>Laufweite %</label><input id="tracking" type="number" value="35" step="1" min="0" max="150" title="Lücke zwischen den Buchstaben in % der Schrifthöhe (nur bei „optisch“)"></div>
+  </div>
+  <div class="row">
     <div><label>Schriftbreite %</label><input id="width_pct" type="number" value="100" step="5" min="50" max="200" title="Buchstaben waagrecht strecken (z. B. 115 für ein breiteres T)"></div>
     <div><label>Zeichenabstand</label><input id="letter_spacing" type="number" value="0" step="0.1" min="-3" max="10" title="zusätzlicher Abstand zwischen den Buchstaben in mm"></div>
   </div>
@@ -154,7 +158,7 @@ pre{max-height:260px;overflow:auto;background:#1c1c1a;color:#e8e6df;padding:10px
 <input type="file" id="fileinput" accept=".svg,.dxf,.dwg" hidden>
 <script>
 const $=id=>document.getElementById(id);
-const ids=["plate_src","plate_w","plate_h","plate_r","text","font","height","text_bottom","width_pct","letter_spacing","margin_side","align","autoshrink","smooth",
+const ids=["plate_src","plate_w","plate_h","plate_r","text","font","height","text_bottom","spacing_mode","tracking","width_pct","letter_spacing","margin_side","align","autoshrink","smooth",
   "logo_on","logo_gap","margin_top","logo_scale","logo_dx","logo_dy","logo_fill","fill_step","logo_depth",
   "depth","line_w","feed","plunge","rpm","safe_z","passes","park_x","park_y","park_z","park","wcs","mode"];
 const KEY="srm20-gravur-v2";
@@ -200,6 +204,7 @@ function matchPreset(){
   $("preset").value=i<0?"":String(i);
   $("pdel").disabled=i<0||!!presets[i].builtin;
 }
+function toggleTracking(){$("tracking").disabled=$("spacing_mode").value!=="optical"}
 function toggleSrc(){const f=$("plate_src").value==="file";$("rectbox").hidden=f;$("filebox").hidden=!f}
 
 function schedule(){clearTimeout(timer);timer=setTimeout(update,200)}
@@ -238,6 +243,7 @@ function draw(r){
 ids.forEach(i=>{$(i).addEventListener("input",schedule);$(i).addEventListener("change",schedule)});
 ["plate_w","plate_h","plate_r"].forEach(i=>$(i).addEventListener("input",matchPreset));
 $("plate_src").addEventListener("change",toggleSrc);
+$("spacing_mode").addEventListener("change",toggleTracking);
 $("preset").onchange=()=>{const p=presets[+$("preset").value];if(!p||$("preset").value==="")return matchPreset();
   $("plate_w").value=p.w;$("plate_h").value=p.h;$("plate_r").value=p.r;matchPreset();schedule()};
 $("psave").onclick=async()=>{const name=prompt("Name der Vorlage:",`Platte ${$("plate_w").value} × ${$("plate_h").value} mm`);if(!name)return;
@@ -269,5 +275,5 @@ $("send").onclick=async()=>{
   $("msg").innerHTML=r.ok?`<span style="color:var(--ok)">✓ An Fräse gesendet.</span>`:`<span style="color:var(--acc)">Fehler: ${esc(r.error)}</span>`;
   setTimeout(()=>$("send").disabled=false,3000);
 };
-restore();toggleSrc();info().then(update);
+restore();toggleSrc();toggleTracking();info().then(update);
 </script></body></html>

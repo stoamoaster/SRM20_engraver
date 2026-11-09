@@ -63,13 +63,21 @@ Diese Felder gelten für **`/api/preview`** und **`/api/send`** (bei `send` komm
 | `text` | Text | `""` | max. 200 Zeichen | Gravurtext, Zeilenumbruch mit `\n` |
 | `font` | Text | `"relief"` | Schlüssel aus `/api/info` → `fonts` | Schrift (siehe unten) |
 | `height` | Zahl | 10 | 0,5–100 | Höhe der Großbuchstaben |
+| `spacing_mode` | Text | `"optical"` | `optical`, `font` | `optical` = Abstände nach der Form der Buchstaben gleichmäßig ausgleichen (siehe unten). `font` = Abstände und Kerning wie in der Schrift festgelegt. |
+| `tracking` | Zahl | 35 | 0–150 | Laufweite bei `optical`: Ziel-Lücke zwischen zwei Buchstaben in % der Schrifthöhe. 35 ergibt etwa die gleiche Textbreite wie `font`. |
 | `width_pct` | Zahl | 100 | 50–200 | Schriftbreite in %. Streckt die Buchstaben waagrecht. |
-| `letter_spacing` | Zahl | 0 | −3–10 | Zusätzlicher Abstand zwischen den Buchstaben in mm |
+| `letter_spacing` | Zahl | 0 | −3–10 | Zusätzlicher Abstand zwischen den Buchstaben in mm (in beiden Modi) |
 | `text_bottom` | Zahl | 3 | ≥ 0 | Abstand vom unteren Werkstückrand bis zum tiefsten Punkt des Texts |
 | `margin_side` | Zahl | 3 | ≥ 0 | Rand links und rechts (für die automatische Verkleinerung und das Logo) |
 | `align` | Text | `"center"` | `left`, `center`, `right` | Ausrichtung mehrerer Zeilen zueinander. Der Textblock selbst steht immer mittig. |
 | `autoshrink` | bool | `true` | | Zu breiten Text verkleinern, bis er zwischen die seitlichen Ränder passt |
 | `smooth` | bool | `true` | | Rundungen glätten, Ecken bleiben scharf. Wirkt nur bei Hershey-Schriften. |
+
+**Optischer Ausgleich** (`spacing_mode: "optical"`): Die festen Zeichenbreiten der Schrift werden ignoriert.
+Jedes Zeichen wird in 30 waagrechte Streifen zerlegt, und pro Streifen wird gemessen, wo die Linie links und rechts endet.
+Das nächste Zeichen wird so gesetzt, dass ½ · engste Lücke + ½ · mittlere Lücke = `tracking` % der Höhe ergibt.
+Tiefe Einbuchtungen (z. B. beim T, L, r) zählen nur bis 22 % der Höhe, und die engste Stelle bleibt
+mindestens 35 % der Ziel-Lücke breit, damit sich keine Buchstaben berühren. Prinzip wie HT Letterspacer.
 
 **Schriften** (`font`):
 

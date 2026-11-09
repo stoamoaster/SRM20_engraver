@@ -175,8 +175,10 @@ def _umlaut_marks(glyph_pts, cap):
 
 def _svg_line(font, line, k, width=1.0, spacing=0.0):
     """Eine Zeile mit einer SVG-Schrift setzen (mm, Grundlinie y=0).
-    width = waagrechte Streckung (1 = normal), spacing = zusätzlicher Zeichenabstand in mm."""
-    out, x, prev = [], 0.0, None   # x in Schrift-Einheiten (bereits gestreckt)
+    width = waagrechte Streckung (1 = normal), spacing = zusätzlicher Zeichenabstand in mm.
+    Liefert eine Liste von Zeichen-Gruppen [Striche], nach Schrift-Metrik + Kerning positioniert;
+    Leerzeichen sind leere Gruppen."""
+    groups, x, prev = [], 0.0, None   # x in Schrift-Einheiten (bereits gestreckt)
     extra = spacing / k
 
     def put(c):
@@ -189,7 +191,7 @@ def _svg_line(font, line, k, width=1.0, spacing=0.0):
                 use, marks = UMLAUTS[ch], True
             elif ch == "ß" and font.has("s"):
                 for c in "ss":  # Notlösung
-                    out += put(c)
+                    groups.append(put(c))
                     x += font.advance(c) * width + extra
                 prev = "s"
                 continue
@@ -198,49 +200,134 @@ def _svg_line(font, line, k, width=1.0, spacing=0.0):
         glyph = put(use)
         if marks and glyph:
             glyph += _umlaut_marks([p for s in glyph for p in s], font.cap)
-        out += glyph
+        groups.append(glyph)
         x += font.advance(use) * width + extra
         prev = use
-    return [simplify([(px * k, py * k) for px, py in s]) for s in out]
+    return [[simplify([(px * k, py * k) for px, py in s]) for s in g] for g in groups]
+
+
+def _hershey_line(font, cap, base, line, k, width=1.0, spacing=0.0, smooth=True):
+    """Eine Zeile mit einer Hershey-Schrift setzen -> Zeichen-Gruppen wie _svg_line."""
+    plain = "".join(UMLAUTS.get(c, c) for c in line)
+    # Striche pro Zeichen zählen, um die Zeichen auseinanderzuhalten (und Umlaut-Punkte zu setzen)
+    all_strokes = [list(s) for s in font.strokes_for_text(plain)]
+    groups, idx = [], 0
+    for j, (orig, ch) in enumerate(zip(line, plain)):
+        n = sum(1 for _ in font.strokes_for_text(ch))
+        glyph = all_strokes[idx: idx + n]
+        idx += n
+        pts = [p for s in glyph for p in s]
+        if orig in UMLAUTS and pts:
+            glyph += _umlaut_marks(pts, cap)
+        shift = j * spacing / (k * width)  # Zeichenabstand in Schrift-Einheiten
+        g = [[((x + shift) * k * width, (y - base) * k) for x, y in s] for s in glyph if len(s) >= 2]
+        groups.append([smooth_stroke(s) for s in g] if smooth else g)
+    return groups
+
+
+# ---- optischer Zeichenabstand (Prinzip wie HT Letterspacer) ----
+OPT_BANDS = 30        # Anzahl waagrechter Streifen
+OPT_ZONE = (-0.35, 1.35)  # Streifen-Bereich in Vielfachen der Versalhöhe (Unterlängen bis Akzente)
+OPT_DEPTH = 0.22      # tiefere Einbuchtungen (z. B. beim T, L, r) zählen nur bis zu dieser Tiefe (× Höhe)
+OPT_MIN_GAP = 0.35    # engster Abstand mindestens dieser Anteil der Ziel-Lücke
+OPT_WORD = 0.18       # Wortabstand (× Höhe × Breite), zusätzlich zur Ziel-Lücke
+OPT_TRACKING = 35     # Standard-Laufweite in % der Höhe (≈ gleiche Textbreite wie die Schrift-Metrik)
+
+
+def _profile(strokes, y0, y1, n):
+    """Pro Streifen: linkester und rechtester Tintenpunkt (None = Streifen leer)."""
+    h = (y1 - y0) / n
+    L, R = [math.inf] * n, [-math.inf] * n
+    for s in strokes:
+        for (ax, ay), (bx, by) in zip(s, s[1:]):
+            lo, hi = min(ay, by), max(ay, by)
+            if hi < y0 or lo > y1:
+                continue
+            i0 = max(0, int((lo - y0) / h))
+            i1 = min(n - 1, int((hi - y0) / h))
+            for i in range(i0, i1 + 1):
+                ya, yb = y0 + i * h, y0 + (i + 1) * h
+                if ay == by:
+                    xa, xb = ax, bx
+                else:
+                    t0, t1 = sorted(((ya - ay) / (by - ay), (yb - ay) / (by - ay)))
+                    t0, t1 = max(0.0, t0), min(1.0, t1)
+                    if t0 > t1:
+                        continue
+                    xa, xb = ax + (bx - ax) * t0, ax + (bx - ax) * t1
+                L[i] = min(L[i], xa, xb)
+                R[i] = max(R[i], xa, xb)
+    return L, R
+
+
+def _optical_offset(RA, LB, gap, depth, min_gap):
+    """Versatz von Zeichen B gegenüber A (beide im eigenen Koordinatensystem), sodass
+    ½·engste Lücke + ½·mittlere Lücke = gap."""
+    maxR = max((r for r in RA if r > -math.inf), default=None)
+    minL = min((l for l in LB if l < math.inf), default=None)
+    if maxR is None or minL is None:
+        return gap
+    c = []
+    for ra, lb in zip(RA, LB):
+        if ra == -math.inf and lb == math.inf:
+            continue  # Streifen bei beiden leer -> zählt nicht
+        ra = maxR - depth if ra == -math.inf else max(ra, maxR - depth)
+        lb = minL + depth if lb == math.inf else min(lb, minL + depth)
+        c.append(lb - ra)
+    if not c:
+        return gap - (minL - maxR)
+    d = gap - 0.5 * (min(c) + sum(c) / len(c))
+    return max(d, min_gap - min(c))  # nie enger als min_gap (keine Berührung)
+
+
+def _optical_layout(groups, height, width, tracking, spacing):
+    """Setzt die Zeichen-Gruppen einer Zeile mit optisch gleichmäßigen Abständen neu."""
+    gap = tracking / 100 * height
+    depth, min_gap = OPT_DEPTH * height, OPT_MIN_GAP * gap
+    y0, y1 = OPT_ZONE[0] * height, OPT_ZONE[1] * height
+    out, prev, x, pending = [], None, 0.0, 0.0  # prev = (Profil R, Versatz)
+    for g in groups:
+        if not g:  # Leerzeichen
+            pending += OPT_WORD * height * width + gap + spacing
+            continue
+        bb = bbox_of(g)
+        g = [[(px - bb[0], py) for px, py in s] for s in g]  # Tinte beginnt bei x = 0
+        L, R = _profile(g, y0, y1, OPT_BANDS)
+        if prev is None:
+            x = 0.0
+        else:
+            x = prev[1] + _optical_offset(prev[0], L, gap, depth, min_gap) + spacing + pending
+        pending = 0.0
+        out += [[(px + x, py) for px, py in s] for s in g]
+        prev = (R, x)
+    return out
 
 
 def text_to_strokes(text, height, font_name, line_spacing=1.6, align="center", smooth=True,
-                    width=1.0, spacing=0.0):
+                    width=1.0, spacing=0.0, optical=False, tracking=OPT_TRACKING):
     """Liefert eine Liste von Polylinien [(x,y), ...] in mm. Grundlinie der 1. Zeile bei y=0.
-    width: Schriftbreite (1 = normal), spacing: zusätzlicher Zeichenabstand in mm."""
+    width: Schriftbreite (1 = normal), spacing: zusätzlicher Zeichenabstand in mm.
+    optical: Abstände nach Form der Buchstaben statt nach Schrift-Metrik; tracking = Lücke in % der Höhe."""
     if is_svg_font(font_name):
         font = get_font(font_name)
         k = height / font.cap
-        lines_out = [[[(x, y - li * height * line_spacing) for x, y in s]
-                      for s in _svg_line(font, line, k, width, spacing)]
-                     for li, line in enumerate(text.split("\n"))]
-        return _align_lines(lines_out, align)
+        make = lambda line: _svg_line(font, line, k, width, 0.0 if optical else spacing)
+        lines = text.split("\n")
+    else:
+        font, cap, base = get_font(font_name)
+        k = height / cap
+        make = lambda line: _hershey_line(font, cap, base, line, k, width, 0.0 if optical else spacing, smooth)
+        lines = text.replace("ß", "ss").split("\n")
 
-    font, cap, base = get_font(font_name)
-    k = height / cap
     lines_out = []
-
-    for li, line in enumerate(text.replace("ß", "ss").split("\n")):
-        plain = "".join(UMLAUTS.get(c, c) for c in line)
-        line_strokes = []
-        # Striche pro Zeichen zählen, um Umlaut-Punkte richtig zu platzieren
-        all_strokes = [list(s) for s in font.strokes_for_text(plain)]
-        idx = 0
-        for j, (orig, ch) in enumerate(zip(line, plain)):
-            n = sum(1 for _ in font.strokes_for_text(ch))
-            glyph = all_strokes[idx: idx + n]
-            idx += n
-            pts = [p for s in glyph for p in s]
-            if orig in UMLAUTS and pts:
-                glyph += _umlaut_marks(pts, cap)
-            shift = j * spacing / (k * width)  # Zeichenabstand in Schrift-Einheiten
-            line_strokes.extend([[(x + shift, y) for x, y in s] for s in glyph])
-
+    for li, line in enumerate(lines):
+        groups = make(line)
+        if optical:
+            strokes = _optical_layout(groups, height, width, tracking, spacing)
+        else:
+            strokes = [s for g in groups for s in g]
         y_off = -li * height * line_spacing
-        scaled = [[(x * k * width, (y - base) * k + y_off) for x, y in s] for s in line_strokes if len(s) >= 2]
-        if smooth:
-            scaled = [smooth_stroke(s) for s in scaled]
-        lines_out.append(scaled)
+        lines_out.append([[(x, y + y_off) for x, y in s] for s in strokes])
     return _align_lines(lines_out, align)
 
 
@@ -550,7 +637,9 @@ def build(p):
     # --- Text: zentriert, Unterkante "bottom" mm über der Werkstückkante
     smooth = flag(p, "smooth", True)
     style = dict(align=align, smooth=smooth, width=num(p, "width_pct", 100, 50, 200) / 100,
-                 spacing=num(p, "letter_spacing", 0, -3, 10))
+                 spacing=num(p, "letter_spacing", 0, -3, 10),
+                 optical=p.get("spacing_mode", "optical") != "font",
+                 tracking=num(p, "tracking", OPT_TRACKING, 0, 150))
     text_s = text_to_strokes(text, height, font, **style) if text.strip() else []
     tb = bbox_of(text_s)
     real_h = height

@@ -57,8 +57,12 @@ Abbrechen: in VPanel oder mit der VIEW-Taste an der Maschine.
   echten Kurven und Kerning. Dazu kommen vier EMS-Schriften (alle frei, siehe `fonts/LIZENZEN.md`).
   Die alten Hershey-Schriften sind auf einem groben Raster gezeichnet (bei 10 mm Höhe ca. 0,5 mm).
   Bei ihnen macht „Rundungen glätten“ die Kurven runder.
+- **Zeichenabstände „optisch“** (Standard): Das Programm misst die Form jedes Buchstabens
+  und setzt die Abstände so, dass alle Lücken gleich groß wirken (z. B. „ko“ wie „Ja“).
+  „Laufweite %“ regelt, wie eng der Text läuft. Mit „aus Schrift“ gelten wieder die Abstände
+  und das Kerning der Schrift.
 - „Schriftbreite %“ streckt die Buchstaben waagrecht, z. B. für ein breiteres T.
-  „Zeichenabstand“ zieht den Text auseinander.
+  „Zeichenabstand“ zieht den Text zusätzlich auseinander.
 - Am Ende fährt die Fräse in die **VIEW-Position**: erst Z hoch, dann X/Y. Standard ist
   X 33,7 / Y 121,8 / Z 57,5 im G54-System. Alle drei Achsen sind unter „Fräsparameter“ einstellbar,
   der Schalter lässt sich auch abschalten. Die Werte beziehen sich auf den Werkstück-Nullpunkt.
