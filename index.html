@@ -75,6 +75,7 @@ pre{max-height:260px;overflow:auto;background:#1c1c1a;color:#e8e6df;padding:10px
     <div><label>Zeilen ausrichten</label><select id="align"><option value="center">Mitte</option><option value="left">Links</option><option value="right">Rechts</option></select></div>
   </div>
   <label class="chk"><input type="checkbox" id="autoshrink" checked> zu breiten Text automatisch verkleinern</label>
+  <label class="chk"><input type="checkbox" id="smooth" checked> Rundungen glätten (empfohlen ab ca. 5 mm Höhe)</label>
   <p class="note">Höhe = Höhe der Großbuchstaben. Der Text wird waagrecht mittig gesetzt, „Abstand unten“ gilt bis zum tiefsten Punkt (auch g, p, y).</p>
 </details>
 
@@ -142,7 +143,7 @@ pre{max-height:260px;overflow:auto;background:#1c1c1a;color:#e8e6df;padding:10px
 <input type="file" id="fileinput" accept=".svg,.dxf,.dwg" hidden>
 <script>
 const $=id=>document.getElementById(id);
-const ids=["plate_src","plate_w","plate_h","plate_r","text","font","height","text_bottom","margin_side","align","autoshrink",
+const ids=["plate_src","plate_w","plate_h","plate_r","text","font","height","text_bottom","margin_side","align","autoshrink","smooth",
   "logo_on","logo_gap","margin_top","logo_scale","logo_dx","logo_dy","logo_fill","fill_step","logo_depth",
   "depth","line_w","feed","plunge","rpm","safe_z","passes","wcs","mode"];
 const KEY="srm20-gravur-v2";

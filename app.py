@@ -61,7 +61,85 @@ def get_font(name):
     return _font_cache[name]
 
 
-def text_to_strokes(text, height, font_name, line_spacing=1.6, align="center"):
+CORNER_DEG = 55  # stärkere Richtungsänderung = echte Ecke, wird nicht verrundet
+
+
+def _turn(a, b, c):
+    """Richtungsänderung in Grad am Punkt b."""
+    a1 = math.atan2(b[1] - a[1], b[0] - a[0])
+    a2 = math.atan2(c[1] - b[1], c[0] - b[0])
+    return abs((math.degrees(a2 - a1) + 180) % 360 - 180)
+
+
+def _chaikin(pts, closed, iterations=3):
+    for _ in range(iterations):
+        segs = list(zip(pts, pts[1:]))
+        out = [] if closed else [pts[0]]
+        for (ax, ay), (bx, by) in segs:
+            out.append((0.75 * ax + 0.25 * bx, 0.75 * ay + 0.25 * by))
+            out.append((0.25 * ax + 0.75 * bx, 0.25 * ay + 0.75 * by))
+        if closed:
+            out.append(out[0])
+        else:
+            out.append(pts[-1])
+        pts = out
+    return pts
+
+
+def simplify(pts, tol=0.01):
+    """Douglas-Peucker: entfernt Punkte, die weniger als tol mm von der Linie abweichen."""
+    if len(pts) < 3:
+        return pts
+    keep = [False] * len(pts)
+    keep[0] = keep[-1] = True
+    stack = [(0, len(pts) - 1)]
+    while stack:
+        a, b = stack.pop()
+        best, idx = 0.0, None
+        for i in range(a + 1, b):
+            d = _seg_dist(pts[i], pts[a], pts[b])
+            if d > best:
+                best, idx = d, i
+        if idx is not None and best > tol:
+            keep[idx] = True
+            stack += [(a, idx), (idx, b)]
+    return [p for p, k in zip(pts, keep) if k]
+
+
+def smooth_stroke(s):
+    return simplify(_smooth_stroke(s))
+
+
+def _smooth_stroke(s):
+    """Glättet die groben Hershey-Polygone (Raster ~0,5 mm bei 10 mm Schrift) zu runden Kurven.
+    Ecken über CORNER_DEG bleiben scharf, Anfangs- und Endpunkte bleiben, wo sie sind."""
+    s = [p for i, p in enumerate(s) if i == 0 or math.dist(p, s[i - 1]) > 1e-9]
+    if len(s) < 3:
+        return s
+    closed = math.dist(s[0], s[-1]) < 1e-6
+    n = len(s)
+    corner = [False] * n
+    for i in range(1, n - 1):
+        corner[i] = _turn(s[i - 1], s[i], s[i + 1]) > CORNER_DEG
+    if closed and _turn(s[-2], s[0], s[1]) <= CORNER_DEG:
+        # geschlossene Kurve ohne Ecke an der Naht (z. B. "o"): Naht auf erste Ecke legen
+        # oder - wenn es keine gibt - ringsum glätten
+        idx = next((i for i in range(1, n - 1) if corner[i]), None)
+        if idx is None:
+            return _chaikin(s, closed=True)
+        s = s[idx:-1] + s[:idx + 1]
+        return _smooth_stroke(s)
+    # an Ecken aufteilen, jedes Stück einzeln glätten
+    out, start = [s[0]], 0
+    for i in range(1, n):
+        if i == n - 1 or corner[i]:
+            piece = s[start:i + 1]
+            out += _chaikin(piece, closed=False)[1:] if len(piece) >= 3 else piece[1:]
+            start = i
+    return out
+
+
+def text_to_strokes(text, height, font_name, line_spacing=1.6, align="center", smooth=True):
     """Liefert eine Liste von Polylinien [(x,y), ...] in mm. Grundlinie der 1. Zeile bei y=0."""
     font, cap, base = get_font(font_name)
     k = height / cap
@@ -90,6 +168,8 @@ def text_to_strokes(text, height, font_name, line_spacing=1.6, align="center"):
 
         y_off = -li * height * line_spacing
         scaled = [[(x * k, (y - base) * k + y_off) for x, y in s] for s in line_strokes if len(s) >= 2]
+        if smooth:
+            scaled = [smooth_stroke(s) for s in scaled]
         lines_out.append(scaled)
 
     # Zeilen zueinander ausrichten
@@ -331,6 +411,14 @@ def num(p, key, default, lo=None, hi=None):
     return v
 
 
+def flag(p, key, default):
+    """Wahrheitswert aus JSON: true/false, 1/0 oder Text wie "true", "false", "ja", "nein", "on", "off"."""
+    v = p.get(key, default)
+    if isinstance(v, str):
+        return v.strip().lower() in ("1", "true", "yes", "ja", "on", "y", "j")
+    return bool(v)
+
+
 def build(p):
     text = str(p.get("text", ""))[:MAX_CHARS]
     font = p.get("font", "futural")
@@ -369,15 +457,16 @@ def build(p):
                         f"({WORK_X:.0f} × {WORK_Y:.0f} mm).")
 
     # --- Text: zentriert, Unterkante "bottom" mm über der Werkstückkante
-    text_s = text_to_strokes(text, height, font, align=align) if text.strip() else []
+    smooth = flag(p, "smooth", True)
+    text_s = text_to_strokes(text, height, font, align=align, smooth=smooth) if text.strip() else []
     tb = bbox_of(text_s)
     real_h = height
-    if tb and p.get("autoshrink", True):
+    if tb and flag(p, "autoshrink", True):
         avail = pw - 2 * side
         tw = tb[2] - tb[0]
         if tw > avail > 0:
             real_h = height * avail / tw
-            text_s = text_to_strokes(text, real_h, font, align=align)
+            text_s = text_to_strokes(text, real_h, font, align=align, smooth=smooth)
             tb = bbox_of(text_s)
             warnings.append(f"Text zu breit – Schrifthöhe automatisch auf {real_h:.1f} mm verkleinert.")
     if tb:
@@ -389,7 +478,7 @@ def build(p):
 
     # --- Logo: in den freien Bereich über dem Text eingepasst
     logo_s, logo_area = [], None
-    asset = load_asset("logo") if p.get("logo_on", True) else None
+    asset = load_asset("logo") if flag(p, "logo_on", True) else None
     if asset:
         y_lo = tb[3] + gap if tb else bottom
         area = (side, y_lo, pw - side, ph - top)
@@ -401,7 +490,7 @@ def build(p):
             cx = (area[0] + area[2]) / 2 + num(p, "logo_dx", 0)
             cy = (area[1] + area[3]) / 2 + num(p, "logo_dy", 0)
             logo_s = transform(asset["strokes"], k, cx - (lb[0] + lb[2]) / 2 * k, cy - (lb[1] + lb[3]) / 2 * k)
-            if p.get("logo_fill"):
+            if flag(p, "logo_fill", False):
                 fill = hatch(logo_s, num(p, "fill_step", line_w * 0.8, 0.05, 10))
                 if not fill:
                     warnings.append("Logo hat keine geschlossenen Flächen – Füllen nicht möglich.")

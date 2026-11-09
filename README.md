@@ -53,7 +53,12 @@ Abbrechen: in VPanel oder mit der VIEW-Taste an der Maschine.
 ## Hinweise
 - Startwerte für Gravierstichel / V-Fräser in Kunststoff oder Holz: 0,1–0,3 mm Tiefe, 200–400 mm/min.
   In Alu flacher und mit mehreren Durchgängen. Text und Logo können verschiedene Tiefen haben.
+- Die Schriften sind auf einem groben Raster gezeichnet (bei 10 mm Höhe ca. 0,5 mm).
+  „Rundungen glätten“ macht daraus runde Kurven, Ecken bleiben scharf.
 - Umlaute werden aus Grundbuchstabe + Punkten gebaut, ß wird zu „ss“.
 - Zeichen, die die Schrift nicht kennt (z. B. €), werden ausgelassen und angezeigt.
 - Andere Geräte im WLAN können über http://<IP-des-PCs>:5000 gravieren
   (Windows-Firewall fragt beim ersten Start).
+
+## Steuerung durch andere Programme
+Die App hat eine HTTP-API (JSON). Beschreibung aller Endpunkte und Parameter: [API.md](API.md)
