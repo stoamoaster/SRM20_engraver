@@ -53,8 +53,14 @@ Abbrechen: in VPanel oder mit der VIEW-Taste an der Maschine.
 ## Hinweise
 - Startwerte für Gravierstichel / V-Fräser in Kunststoff oder Holz: 0,1–0,3 mm Tiefe, 200–400 mm/min.
   In Alu flacher und mit mehreren Durchgängen. Text und Logo können verschiedene Tiefen haben.
-- Die Schriften sind auf einem groben Raster gezeichnet (bei 10 mm Höhe ca. 0,5 mm).
-  „Rundungen glätten“ macht daraus runde Kurven, Ecken bleiben scharf.
+- **Schriften:** Standard ist *Relief SingleLine*, eine fein gezeichnete Single-Line-Schrift mit
+  echten Kurven und Kerning. Dazu kommen vier EMS-Schriften (alle frei, siehe `fonts/LIZENZEN.md`).
+  Die alten Hershey-Schriften sind auf einem groben Raster gezeichnet (bei 10 mm Höhe ca. 0,5 mm).
+  Bei ihnen macht „Rundungen glätten“ die Kurven runder.
+- „Schriftbreite %“ streckt die Buchstaben waagrecht, z. B. für ein breiteres T.
+  „Zeichenabstand“ zieht den Text auseinander.
+- Am Ende fährt die Fräse in die **VIEW-Position**: erst Z ganz nach oben, dann X/Y (Werkzeug hinten,
+  Tisch vorne). Die Position ist unter „Fräsparameter“ einstellbar oder lässt sich abschalten.
 - Umlaute werden aus Grundbuchstabe + Punkten gebaut, ß wird zu „ss“.
 - Zeichen, die die Schrift nicht kennt (z. B. €), werden ausgelassen und angezeigt.
 - Andere Geräte im WLAN können über http://<IP-des-PCs>:5000 gravieren

@@ -31,16 +31,28 @@ EDGE_MIN = 0.5  # mm – näher am Werkstückrand gibt es eine Warnung
 
 DEFAULT_PRESETS = [{"name": "Platte 70 × 50 mm", "w": 70, "h": 50, "r": 3, "builtin": True}]
 
-FONTS = {
-    "futural": "Futura leicht (einfach, empfohlen)",
-    "futuram": "Futura mittel (doppelte Linie)",
-    "rowmans": "Roman einfach",
-    "rowmand": "Roman doppelt",
-    "scripts": "Schreibschrift",
-    "timesr": "Times",
+FONT_DIR = BASE / "fonts"
+# Schlüssel -> (Anzeigename, Art, Datei bzw. Hershey-Name)
+# SVG-Schriften: fein gezeichnete Single-Line-Schriften (siehe fonts/LIZENZEN.md)
+# Hershey: alte Plotter-Schriften auf grobem Raster (~0,5 mm bei 10 mm Höhe), werden geglättet
+FONT_DEFS = {
+    "relief":      ("Relief SingleLine (empfohlen)", "svg", "ReliefSingleLine.svg"),
+    "readability": ("EMS Readability (schlicht)", "svg", "EMSReadability.svg"),
+    "tech":        ("EMS Tech (technisch, Handschrift)", "svg", "EMSTech.svg"),
+    "osmotron":    ("EMS Osmotron (rund, geometrisch)", "svg", "EMSOsmotron.svg"),
+    "allure":      ("EMS Allure (Schreibschrift)", "svg", "EMSAllure.svg"),
+    "futural":     ("Hershey Futura leicht", "hershey", "futural"),
+    "futuram":     ("Hershey Futura mittel (doppelte Linie)", "hershey", "futuram"),
+    "rowmans":     ("Hershey Roman einfach", "hershey", "rowmans"),
+    "rowmand":     ("Hershey Roman doppelt", "hershey", "rowmand"),
+    "scripts":     ("Hershey Schreibschrift", "hershey", "scripts"),
+    "timesr":      ("Hershey Times", "hershey", "timesr"),
 }
+DEFAULT_FONT = "relief"
+FONTS = {k: v[0] for k, v in FONT_DEFS.items()
+         if v[1] == "hershey" or (FONT_DIR / v[2]).exists()}
 
-# Umlaute kennen die Hershey-Fonts nicht -> Grundbuchstabe + zwei Punkte
+# Fehlen Umlaute in der Schrift -> Grundbuchstabe + zwei Punkte
 UMLAUTS = {"ä": "a", "ö": "o", "ü": "u", "Ä": "A", "Ö": "O", "Ü": "U"}
 
 _font_cache = {}
@@ -48,17 +60,30 @@ _font_cache = {}
 
 # ---------------------------------------------------------------- Text
 
+def font_key(name):
+    return name if name in FONTS else (DEFAULT_FONT if DEFAULT_FONT in FONTS else "futural")
+
+
 def get_font(name):
-    if name not in FONTS:
-        name = "futural"
+    """Hershey: (font, versalhöhe, grundlinie). SVG: SvgFont-Objekt."""
+    name = font_key(name)
     if name not in _font_cache:
-        f = HersheyFonts()
-        f.load_default_font(name)
-        f.normalize_rendering(100)
-        # Großbuchstabenhöhe messen, damit "Höhe" = echte Höhe von H
-        ys = [p[1] for s in f.strokes_for_text("H") for p in s]
-        _font_cache[name] = (f, max(ys) - min(ys), min(ys))
+        kind, src = FONT_DEFS[name][1:]
+        if kind == "svg":
+            import svgfont
+            _font_cache[name] = svgfont.SvgFont(FONT_DIR / src)
+        else:
+            f = HersheyFonts()
+            f.load_default_font(src)
+            f.normalize_rendering(100)
+            # Großbuchstabenhöhe messen, damit "Höhe" = echte Höhe von H
+            ys = [p[1] for s in f.strokes_for_text("H") for p in s]
+            _font_cache[name] = (f, max(ys) - min(ys), min(ys))
     return _font_cache[name]
+
+
+def is_svg_font(name):
+    return FONT_DEFS[font_key(name)][1] == "svg"
 
 
 CORNER_DEG = 55  # stärkere Richtungsänderung = echte Ecke, wird nicht verrundet
@@ -139,8 +164,58 @@ def _smooth_stroke(s):
     return out
 
 
-def text_to_strokes(text, height, font_name, line_spacing=1.6, align="center", smooth=True):
-    """Liefert eine Liste von Polylinien [(x,y), ...] in mm. Grundlinie der 1. Zeile bei y=0."""
+def _umlaut_marks(glyph_pts, cap):
+    """Zwei kurze Striche über einem Buchstaben (für Schriften ohne Umlaute)."""
+    xs = [p[0] for p in glyph_pts]
+    top = max(p[1] for p in glyph_pts)
+    cx = (min(xs) + max(xs)) / 2
+    gap, d = cap * 0.13, cap * 0.035  # kleine Striche statt Punkte -> sauberer Einstich
+    return [[(cx + dx - d, top + gap), (cx + dx + d, top + gap)] for dx in (-cap * 0.13, cap * 0.13)]
+
+
+def _svg_line(font, line, k, width=1.0, spacing=0.0):
+    """Eine Zeile mit einer SVG-Schrift setzen (mm, Grundlinie y=0).
+    width = waagrechte Streckung (1 = normal), spacing = zusätzlicher Zeichenabstand in mm."""
+    out, x, prev = [], 0.0, None   # x in Schrift-Einheiten (bereits gestreckt)
+    extra = spacing / k
+
+    def put(c):
+        return [[(x + px * width, py) for px, py in s] for s in font.strokes(c)]
+
+    for ch in line:
+        use, marks = ch, False
+        if not font.has(ch):
+            if ch in UMLAUTS and font.has(UMLAUTS[ch]):
+                use, marks = UMLAUTS[ch], True
+            elif ch == "ß" and font.has("s"):
+                for c in "ss":  # Notlösung
+                    out += put(c)
+                    x += font.advance(c) * width + extra
+                prev = "s"
+                continue
+        if prev is not None:
+            x -= font.kerning(prev, use) * width
+        glyph = put(use)
+        if marks and glyph:
+            glyph += _umlaut_marks([p for s in glyph for p in s], font.cap)
+        out += glyph
+        x += font.advance(use) * width + extra
+        prev = use
+    return [simplify([(px * k, py * k) for px, py in s]) for s in out]
+
+
+def text_to_strokes(text, height, font_name, line_spacing=1.6, align="center", smooth=True,
+                    width=1.0, spacing=0.0):
+    """Liefert eine Liste von Polylinien [(x,y), ...] in mm. Grundlinie der 1. Zeile bei y=0.
+    width: Schriftbreite (1 = normal), spacing: zusätzlicher Zeichenabstand in mm."""
+    if is_svg_font(font_name):
+        font = get_font(font_name)
+        k = height / font.cap
+        lines_out = [[[(x, y - li * height * line_spacing) for x, y in s]
+                      for s in _svg_line(font, line, k, width, spacing)]
+                     for li, line in enumerate(text.split("\n"))]
+        return _align_lines(lines_out, align)
+
     font, cap, base = get_font(font_name)
     k = height / cap
     lines_out = []
@@ -151,28 +226,26 @@ def text_to_strokes(text, height, font_name, line_spacing=1.6, align="center", s
         # Striche pro Zeichen zählen, um Umlaut-Punkte richtig zu platzieren
         all_strokes = [list(s) for s in font.strokes_for_text(plain)]
         idx = 0
-        for orig, ch in zip(line, plain):
+        for j, (orig, ch) in enumerate(zip(line, plain)):
             n = sum(1 for _ in font.strokes_for_text(ch))
             glyph = all_strokes[idx: idx + n]
             idx += n
             pts = [p for s in glyph for p in s]
             if orig in UMLAUTS and pts:
-                xs = [p[0] for p in pts]
-                top = max(p[1] for p in pts)
-                cx = (min(xs) + max(xs)) / 2
-                gap = cap * 0.13
-                d = cap * 0.035  # kleine Striche statt Punkte -> sauberer Einstich
-                for dx in (-cap * 0.13, cap * 0.13):
-                    glyph.append([(cx + dx - d, top + gap), (cx + dx + d, top + gap)])
-            line_strokes.extend(glyph)
+                glyph += _umlaut_marks(pts, cap)
+            shift = j * spacing / (k * width)  # Zeichenabstand in Schrift-Einheiten
+            line_strokes.extend([[(x + shift, y) for x, y in s] for s in glyph])
 
         y_off = -li * height * line_spacing
-        scaled = [[(x * k, (y - base) * k + y_off) for x, y in s] for s in line_strokes if len(s) >= 2]
+        scaled = [[(x * k * width, (y - base) * k + y_off) for x, y in s] for s in line_strokes if len(s) >= 2]
         if smooth:
             scaled = [smooth_stroke(s) for s in scaled]
         lines_out.append(scaled)
+    return _align_lines(lines_out, align)
 
-    # Zeilen zueinander ausrichten
+
+def _align_lines(lines_out, align):
+    """Zeilen zueinander ausrichten (links/mittig/rechts)."""
     widths = []
     for ls in lines_out:
         xs = [p[0] for s in ls for p in s]
@@ -187,6 +260,10 @@ def text_to_strokes(text, height, font_name, line_spacing=1.6, align="center", s
 
 
 def missing_chars(text, font):
+    if is_svg_font(font):
+        f = get_font(font)
+        return sorted({c for c in text if c not in "\n " and not f.has(c)
+                       and not (c in UMLAUTS and f.has(UMLAUTS[c])) and not (c == "ß" and f.has("s"))})
     f = get_font(font)[0]
     return sorted({c for c in text if c not in "\n ß" and c not in UMLAUTS
                    and not list(f.strokes_for_text(c))})
@@ -295,9 +372,15 @@ def optimize_order(strokes, start=(0.0, 0.0)):
 # ---------------------------------------------------------------- G-Code
 
 WCS = ("G54", "G55", "G56", "G57", "G58", "G59")
+# VIEW-/Parkposition in Maschinenkoordinaten (Nullpunkt oben vorne links):
+# X links, Y ganz hinten -> Tisch kommt nach vorne
+PARK_X, PARK_Y = 0.0, WORK_Y
 
 
-def make_gcode(jobs, safe_z, feed, plunge, rpm, passes, wcs="G54"):
+def make_gcode(jobs, safe_z, feed, plunge, rpm, passes, wcs="G54", park=None):
+    """park: None = am Ende zum Werkstück-Nullpunkt (X0 Y0) fahren.
+    (x, y) = Parkposition in MASCHINENkoordinaten: erst Z ganz nach oben (G53 Z0),
+    dann X/Y. Maschinen-Nullpunkt der Roland = oben, vorne links."""
     """jobs: Liste von (strokes, tiefe). Tiefe < 0 = über der Oberfläche (Luftschnitt).
 
     wcs: Werkstück-Koordinatensystem, in dem in VPanel der Nullpunkt gesetzt wurde.
@@ -341,7 +424,13 @@ def make_gcode(jobs, safe_z, feed, plunge, rpm, passes, wcs="G54"):
                     cut_len += math.hypot(bx - ax, by - ay)
                 pos = s[-1]
             g.append(f"G00 Z{safe_z:.3f}")
-    g += ["M05", "G00 X0.000 Y0.000", "%"]
+    if park:
+        g += ["M05",
+              "G53 Z0.000",                               # Z ganz nach oben
+              f"G53 X{park[0]:.3f} Y{park[1]:.3f}",      # dann X/Y in die VIEW-/Parkposition
+              "%"]
+    else:
+        g += ["M05", "G00 X0.000 Y0.000", "%"]
     # grobe Zeitschätzung (Eilgang ~ 1800 mm/min)
     minutes = cut_len / feed + travel / 1800 + plunges * (2 * safe_z + 0.5) / plunge
     return "\n".join(g) + "\n", minutes
@@ -421,7 +510,7 @@ def flag(p, key, default):
 
 def build(p):
     text = str(p.get("text", ""))[:MAX_CHARS]
-    font = p.get("font", "futural")
+    font = font_key(p.get("font", DEFAULT_FONT))
     align = p.get("align") if p.get("align") in ("left", "center", "right") else "center"
     height = num(p, "height", 10, 0.5, 100)
     depth = num(p, "depth", 0.2, 0.01, 5)
@@ -434,6 +523,8 @@ def build(p):
     line_w = num(p, "line_w", 0.3, 0.05, 5)
     mode = p.get("mode") if p.get("mode") in ("engrave", "air", "outline") else "engrave"
     wcs = p.get("wcs") if p.get("wcs") in WCS else "G54"
+    park = ((num(p, "park_x", PARK_X, 0, WORK_X), num(p, "park_y", PARK_Y, 0, WORK_Y))
+            if flag(p, "park", True) else None)
     side = num(p, "margin_side", 3, 0)
     bottom = num(p, "text_bottom", 3, 0)
     top = num(p, "margin_top", 3, 0)
@@ -458,16 +549,27 @@ def build(p):
 
     # --- Text: zentriert, Unterkante "bottom" mm über der Werkstückkante
     smooth = flag(p, "smooth", True)
-    text_s = text_to_strokes(text, height, font, align=align, smooth=smooth) if text.strip() else []
+    style = dict(align=align, smooth=smooth, width=num(p, "width_pct", 100, 50, 200) / 100,
+                 spacing=num(p, "letter_spacing", 0, -3, 10))
+    text_s = text_to_strokes(text, height, font, **style) if text.strip() else []
     tb = bbox_of(text_s)
     real_h = height
     if tb and flag(p, "autoshrink", True):
         avail = pw - 2 * side
-        tw = tb[2] - tb[0]
-        if tw > avail > 0:
-            real_h = height * avail / tw
-            text_s = text_to_strokes(text, real_h, font, align=align, smooth=smooth)
+        prev = None
+        for _ in range(6):  # Breite = a·Höhe + fester Zeichenabstand -> nach 2 Schritten exakt
+            tw = tb[2] - tb[0]
+            if not tw > avail + 0.01 or avail <= 0:
+                break
+            if prev and prev[1] != tw:
+                new_h = real_h + (avail - tw) * (real_h - prev[0]) / (tw - prev[1])
+            else:
+                new_h = real_h * avail / tw
+            prev = (real_h, tw)
+            real_h = max(0.5, new_h * 0.999)
+            text_s = text_to_strokes(text, real_h, font, **style)
             tb = bbox_of(text_s)
+        if real_h < height:
             warnings.append(f"Text zu breit – Schrifthöhe automatisch auf {real_h:.1f} mm verkleinert.")
     if tb:
         text_s = transform(text_s, 1, pw / 2 - (tb[0] + tb[2]) / 2, bottom - tb[1])
@@ -512,11 +614,11 @@ def build(p):
     text_o = optimize_order(text_s)
     logo_o = optimize_order(logo_s, text_o[-1][-1] if text_o else (0.0, 0.0))
     if mode == "air":  # Luftschnitt: Fräser fährt 1 mm ÜBER der Oberfläche
-        gcode, minutes = make_gcode([(text_o, -1.0), (logo_o, -1.0)], max(safe_z, 3), feed, plunge, rpm, 1, wcs)
+        gcode, minutes = make_gcode([(text_o, -1.0), (logo_o, -1.0)], max(safe_z, 3), feed, plunge, rpm, 1, wcs, park)
     elif mode == "outline":  # nur Werkstückumriss 1 mm über der Oberfläche abfahren
-        gcode, minutes = make_gcode([(plate_strokes, -1.0)], max(safe_z, 3), feed, plunge, rpm, 1, wcs)
+        gcode, minutes = make_gcode([(plate_strokes, -1.0)], max(safe_z, 3), feed, plunge, rpm, 1, wcs, park)
     else:
-        gcode, minutes = make_gcode([(text_o, depth), (logo_o, logo_depth)], safe_z, feed, plunge, rpm, passes, wcs)
+        gcode, minutes = make_gcode([(text_o, depth), (logo_o, logo_depth)], safe_z, feed, plunge, rpm, passes, wcs, park)
 
     return dict(text=text_s, logo=logo_s, plate=plate_strokes, plate_size=(pw, ph), logo_area=logo_area,
                 text_height=real_h if tb else None, text_bbox=tb, gcode=gcode, minutes=minutes,
@@ -544,7 +646,7 @@ def info():
     for kind in ASSETS:
         a = load_asset(kind)
         assets[kind] = {"name": a["name"], "notes": a.get("notes", [])} if a else None
-    return jsonify(fonts=FONTS, printers=list_printers(), windows=bool(win32print),
+    return jsonify(fonts=FONTS, font_list=[[k, v] for k, v in FONTS.items()], default_font=font_key(DEFAULT_FONT), printers=list_printers(), windows=bool(win32print),
                    presets=presets(), assets=assets)
 
 

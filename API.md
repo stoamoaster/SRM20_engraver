@@ -61,13 +61,28 @@ Diese Felder gelten für **`/api/preview`** und **`/api/send`** (bei `send` komm
 | Feld | Typ | Standard | Bereich | Bedeutung |
 |---|---|---|---|---|
 | `text` | Text | `""` | max. 200 Zeichen | Gravurtext, Zeilenumbruch mit `\n` |
-| `font` | Text | `"futural"` | Schlüssel aus `/api/info` → `fonts` | Schrift |
+| `font` | Text | `"relief"` | Schlüssel aus `/api/info` → `fonts` | Schrift (siehe unten) |
 | `height` | Zahl | 10 | 0,5–100 | Höhe der Großbuchstaben |
+| `width_pct` | Zahl | 100 | 50–200 | Schriftbreite in %. Streckt die Buchstaben waagrecht. |
+| `letter_spacing` | Zahl | 0 | −3–10 | Zusätzlicher Abstand zwischen den Buchstaben in mm |
 | `text_bottom` | Zahl | 3 | ≥ 0 | Abstand vom unteren Werkstückrand bis zum tiefsten Punkt des Texts |
 | `margin_side` | Zahl | 3 | ≥ 0 | Rand links und rechts (für die automatische Verkleinerung und das Logo) |
 | `align` | Text | `"center"` | `left`, `center`, `right` | Ausrichtung mehrerer Zeilen zueinander. Der Textblock selbst steht immer mittig. |
 | `autoshrink` | bool | `true` | | Zu breiten Text verkleinern, bis er zwischen die seitlichen Ränder passt |
-| `smooth` | bool | `true` | | Rundungen der Schrift glätten, Ecken bleiben scharf |
+| `smooth` | bool | `true` | | Rundungen glätten, Ecken bleiben scharf. Wirkt nur bei Hershey-Schriften. |
+
+**Schriften** (`font`):
+
+| Schlüssel | Schrift | Art |
+|---|---|---|
+| `relief` | Relief SingleLine (Standard, empfohlen) | SVG, echte Kurven, Kerning, Umlaute, ß, € |
+| `readability` | EMS Readability | SVG, schlichte Grotesk |
+| `tech` | EMS Tech | SVG, technische Handschrift |
+| `osmotron` | EMS Osmotron | SVG, eckig-geometrisch |
+| `allure` | EMS Allure | SVG, Schreibschrift |
+| `futural`, `futuram`, `rowmans`, `rowmand`, `scripts`, `timesr` | Hershey-Schriften | grobes Raster, ohne Umlaute (werden aus Buchstabe + Strichen gebaut), ohne € |
+
+Die SVG-Schriften liegen im Ordner `fonts/`. Fehlt eine Datei, taucht die Schrift in `/api/info` nicht auf.
 
 ### Logo
 
@@ -98,6 +113,9 @@ bis Höhe − `margin_top`. Das Logo wird mit gleichem Seitenverhältnis eingepa
 | `rpm` | Zahl | 7000 | 3000–7000 | Spindeldrehzahl |
 | `safe_z` | Zahl | 2 | 0,5–30 | Sicherheitshöhe für Leerfahrten. Bei `air`/`outline` mindestens 3. |
 | `wcs` | Text | `"G54"` | `G54`…`G59` | Koordinatensystem, in dem der Nullpunkt in VPanel gesetzt ist |
+| `park` | bool | `true` | | Am Ende in die VIEW-/Parkposition fahren: erst `G53 Z0` (Z ganz hoch), dann `G53 X… Y…`. Bei `false` fährt die Fräse zum Werkstück-Nullpunkt (`G00 X0 Y0`) zurück. |
+| `park_x` | Zahl | 0 | 0–203,2 | Parkposition X in **Maschinen**koordinaten |
+| `park_y` | Zahl | 152,4 | 0–152,4 | Parkposition Y in **Maschinen**koordinaten. 152,4 = Werkzeug ganz hinten, also Tisch ganz vorne. |
 | `line_w` | Zahl | 0,3 | 0,05–5 | Linienbreite. Nur für die Vorschau und als Standard für `fill_step`. |
 
 ---
@@ -108,7 +126,7 @@ Liefert alles, was man zum Ausfüllen eines Auftrags braucht. Kann **einige Seku
 
 ```json
 {
-  "fonts":    {"futural": "Futura leicht (einfach, empfohlen)", "futuram": "Futura mittel (doppelte Linie)", "…": "…"},
+  "fonts":    {"relief": "Relief SingleLine (empfohlen)", "readability": "EMS Readability (schlicht)", "…": "…"},
   "printers": ["Roland SRM-20", "Adobe PDF"],
   "windows":  true,
   "presets":  [{"name": "Platte 70 × 50 mm", "w": 70, "h": 50, "r": 3, "builtin": true}],
@@ -118,7 +136,9 @@ Liefert alles, was man zum Ausfüllen eines Auftrags braucht. Kann **einige Seku
 
 | Feld | Bedeutung |
 |---|---|
-| `fonts` | Schlüssel → Anzeigename. Der Schlüssel kommt in `font`. |
+| `fonts` | Schlüssel → Anzeigename. Der Schlüssel kommt in `font`. (JSON-Objekt, Reihenfolge nicht garantiert) |
+| `font_list` | Dieselben Schriften als `[[Schlüssel, Anzeigename], …]` in sinnvoller Reihenfolge |
+| `default_font` | Schlüssel der Standardschrift (`relief`) |
 | `printers` | Windows-Drucker. Einträge mit „SRM“ im Namen stehen vorne. Leer, wenn pywin32 fehlt. |
 | `windows` | `false` = Senden nicht möglich (nur Vorschau und G-Code) |
 | `presets` | Werkstück-Vorlagen. `builtin: true` = eingebaut, nicht löschbar. |
