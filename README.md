@@ -38,8 +38,10 @@ Standard: Platte **70 × 50 mm** quer, mit runden Ecken.
 - Logo, Kontur und eigene Vorlagen liegen im Ordner `data/` und bleiben beim Neustart erhalten.
 
 ## Pro Gravur
-1. Werkstück einspannen, in VPanel X/Y-Nullpunkt auf die **linke untere Ecke** und
-   **Z-Nullpunkt auf die Oberseite** setzen.
+1. Werkstück einspannen. In VPanel oben als Koordinatensystem **G54** wählen
+   (nicht „Maschinenkoordinatensystem“), dann X/Y-Nullpunkt auf die **linke untere Ecke** und
+   **Z-Nullpunkt auf die Oberseite** setzen. Der G-Code wählt G54 ausdrücklich aus
+   (umstellbar unter „Koordinatensystem“, falls du G55–G59 benutzt).
 2. Text eingeben, Logo prüfen, Vorschau ansehen.
 3. Zum Prüfen: Modus **„Werkstück-Umriss abfahren“** fährt 1 mm über der Platte deren Umriss ab.
    Damit sieht man, ob der Nullpunkt passt.

@@ -214,9 +214,21 @@ def optimize_order(strokes, start=(0.0, 0.0)):
 
 # ---------------------------------------------------------------- G-Code
 
-def make_gcode(jobs, safe_z, feed, plunge, rpm, passes):
-    """jobs: Liste von (strokes, tiefe). Tiefe < 0 = über der Oberfläche (Luftschnitt)."""
-    g = ["%", "G90 G21 G17", f"M03 S{int(rpm)}", f"G00 Z{safe_z:.3f}"]
+WCS = ("G54", "G55", "G56", "G57", "G58", "G59")
+
+
+def make_gcode(jobs, safe_z, feed, plunge, rpm, passes, wcs="G54"):
+    """jobs: Liste von (strokes, tiefe). Tiefe < 0 = über der Oberfläche (Luftschnitt).
+
+    wcs: Werkstück-Koordinatensystem, in dem in VPanel der Nullpunkt gesetzt wurde.
+    Ohne ausdrückliche Auswahl kann die SRM-20 in Maschinenkoordinaten fahren
+    (-> fährt nach links unten und auf falsche Höhe)."""
+    g = ["%",
+         "G17 G21 G90",  # XY-Ebene, mm, absolut
+         "G40 G49 G80",  # Radius-/Längenkorrektur und Zyklen aus
+         wcs,            # Nullpunkt aus VPanel verwenden
+         f"G00 Z{safe_z:.3f}",
+         f"M03 S{int(rpm)}"]
     cut_len = travel = 0.0
     pos = (0.0, 0.0)
     plunges = 0
@@ -327,6 +339,7 @@ def build(p):
     passes = int(num(p, "passes", 1, 1, 10))
     line_w = num(p, "line_w", 0.3, 0.05, 5)
     mode = p.get("mode") if p.get("mode") in ("engrave", "air", "outline") else "engrave"
+    wcs = p.get("wcs") if p.get("wcs") in WCS else "G54"
     side = num(p, "margin_side", 3, 0)
     bottom = num(p, "text_bottom", 3, 0)
     top = num(p, "margin_top", 3, 0)
@@ -404,11 +417,11 @@ def build(p):
     text_o = optimize_order(text_s)
     logo_o = optimize_order(logo_s, text_o[-1][-1] if text_o else (0.0, 0.0))
     if mode == "air":  # Luftschnitt: Fräser fährt 1 mm ÜBER der Oberfläche
-        gcode, minutes = make_gcode([(text_o, -1.0), (logo_o, -1.0)], max(safe_z, 3), feed, plunge, rpm, 1)
+        gcode, minutes = make_gcode([(text_o, -1.0), (logo_o, -1.0)], max(safe_z, 3), feed, plunge, rpm, 1, wcs)
     elif mode == "outline":  # nur Werkstückumriss 1 mm über der Oberfläche abfahren
-        gcode, minutes = make_gcode([(plate_strokes, -1.0)], max(safe_z, 3), feed, plunge, rpm, 1)
+        gcode, minutes = make_gcode([(plate_strokes, -1.0)], max(safe_z, 3), feed, plunge, rpm, 1, wcs)
     else:
-        gcode, minutes = make_gcode([(text_o, depth), (logo_o, logo_depth)], safe_z, feed, plunge, rpm, passes)
+        gcode, minutes = make_gcode([(text_o, depth), (logo_o, logo_depth)], safe_z, feed, plunge, rpm, passes, wcs)
 
     return dict(text=text_s, logo=logo_s, plate=plate_strokes, plate_size=(pw, ph), logo_area=logo_area,
                 text_height=real_h if tb else None, text_bbox=tb, gcode=gcode, minutes=minutes,

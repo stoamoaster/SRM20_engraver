@@ -115,6 +115,8 @@ pre{max-height:260px;overflow:auto;background:#1c1c1a;color:#e8e6df;padding:10px
     </div>
     <label>Durchgänge</label><input id="passes" type="number" value="1" min="1" max="10">
   </details>
+  <label>Koordinatensystem (wie in VPanel)</label>
+  <select id="wcs"><option>G54</option><option>G55</option><option>G56</option><option>G57</option><option>G58</option><option>G59</option></select>
   <label>Modus</label>
   <select id="mode">
     <option value="engrave">Gravieren</option>
@@ -125,7 +127,7 @@ pre{max-height:260px;overflow:auto;background:#1c1c1a;color:#e8e6df;padding:10px
   <button class="go" id="send">An Fräse senden</button>
   <button class="sec wide" id="dl">G-Code herunterladen (.nc)</button>
   <div id="msg"></div>
-  <p class="hint">Vorher in VPanel: Befehlssatz <b>NC-Code</b>, X/Y-Nullpunkt auf die linke untere Ecke und Z-Nullpunkt auf die Oberseite setzen. Abbrechen über VPanel oder die VIEW-Taste an der Maschine.</p>
+  <p class="hint">Vorher in VPanel: Befehlssatz <b>NC-Code</b>, oben als Koordinatensystem <b>G54</b> (bzw. das hier gewählte) auswählen, dann X/Y-Nullpunkt auf die linke untere Ecke und Z-Nullpunkt auf die Oberseite setzen. Abbrechen über VPanel oder die VIEW-Taste an der Maschine.</p>
 </details>
 </div>
 
@@ -142,7 +144,7 @@ pre{max-height:260px;overflow:auto;background:#1c1c1a;color:#e8e6df;padding:10px
 const $=id=>document.getElementById(id);
 const ids=["plate_src","plate_w","plate_h","plate_r","text","font","height","text_bottom","margin_side","align","autoshrink",
   "logo_on","logo_gap","margin_top","logo_scale","logo_dx","logo_dy","logo_fill","fill_step","logo_depth",
-  "depth","line_w","feed","plunge","rpm","safe_z","passes","mode"];
+  "depth","line_w","feed","plunge","rpm","safe_z","passes","wcs","mode"];
 const KEY="srm20-gravur-v2";
 let last=null,timer=null,presets=[],seq=0;
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
