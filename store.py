@@ -1,0 +1,148 @@
+"""
+Gespeicherte Dateien im Ordner data/: Logo, Werkstück-Kontur, eigene Vorlagen.
+Dazu das Einlesen von Logo/Kontur aus einer Datei oder direkt aus JSON.
+"""
+import base64
+import binascii
+import json
+import math
+import os
+
+import engraving as E
+import importer
+
+DATA = E.BASE / "data"
+ASSETS = ("logo", "plate")
+DEFAULT_PRESETS = [{"name": "Platte 70 × 50 mm", "w": 70, "h": 50, "r": 3, "builtin": True}]
+MAX_POINTS = 500_000
+
+
+class BadAsset(ValueError):
+    """Logo oder Kontur ist nicht verwendbar (Meldung auf Deutsch)."""
+
+
+def load_json(name, default=None):
+    try:
+        return json.loads((DATA / name).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return default
+
+
+def save_json(name, obj):
+    DATA.mkdir(exist_ok=True)
+    (DATA / name).write_text(json.dumps(obj), encoding="utf-8")
+
+
+# ---------------------------------------------------------------- Vorlagen
+
+def presets():
+    return DEFAULT_PRESETS + load_json("presets.json", [])
+
+
+# ---------------------------------------------------------------- Logo / Kontur
+
+def load_asset(kind):
+    a = load_json(f"{kind}.json")
+    return a if a and a.get("strokes") else None
+
+
+def save_asset(kind, asset):
+    save_json(f"{kind}.json", {"name": asset["name"], "strokes": asset["strokes"], "notes": asset["notes"]})
+
+
+def delete_asset(kind):
+    (DATA / f"{kind}.json").unlink(missing_ok=True)
+
+
+def asset_info(kind):
+    a = load_asset(kind)
+    if not a:
+        return None
+    x0, y0, x1, y1 = E.bbox_of(a["strokes"])
+    return {"name": a["name"], "notes": a.get("notes", []), "size": (round(x1 - x0, 2), round(y1 - y0, 2))}
+
+
+def _finish(kind, name, strokes, notes):
+    """Gemeinsamer Abschluss: Kontur muss geschlossen sein, linke untere Ecke -> 0/0."""
+    notes = list(notes)
+    if kind == "plate":
+        closed = [s for s in strokes if E.is_closed(s)]
+        if not closed:
+            raise BadAsset("Keine geschlossene Kontur gefunden – der Werkstückumriss "
+                           "muss eine geschlossene Linie sein.")
+        if len(closed) < len(strokes):
+            notes.append(f"{len(strokes) - len(closed)} offene Linien ignoriert.")
+        strokes = closed
+    x0, y0, x1, y1 = E.bbox_of(strokes)
+    strokes = E.rnd(E.transform(strokes, 1, -x0, -y0))
+    return {"name": name, "strokes": strokes, "notes": notes,
+            "size": (round(x1 - x0, 2), round(y1 - y0, 2))}
+
+
+def asset_from_file(kind, filename, data):
+    """Datei (SVG/DXF/DWG) als Bytes -> Logo bzw. Kontur."""
+    try:
+        strokes, notes = importer.load(filename, data)
+    except importer.ImportFailed as e:
+        raise BadAsset(str(e))
+    return _finish(kind, filename, strokes, notes)
+
+
+def _strokes_from_json(v):
+    if not isinstance(v, list) or not v:
+        raise BadAsset("strokes muss eine Liste von Linien sein: [[[x, y], [x, y], …], …]")
+    out, n = [], 0
+    for s in v:
+        if not isinstance(s, list) or len(s) < 2:
+            raise BadAsset("Jede Linie in strokes braucht mindestens zwei Punkte.")
+        line = []
+        for pt in s:
+            ok = (isinstance(pt, (list, tuple)) and len(pt) == 2
+                  and all(isinstance(c, (int, float)) and not isinstance(c, bool) and math.isfinite(c) for c in pt))
+            if not ok:
+                raise BadAsset("Jeder Punkt in strokes muss [x, y] mit zwei Zahlen sein.")
+            line.append((float(pt[0]), float(pt[1])))
+        n += len(line)
+        if n > MAX_POINTS:
+            raise BadAsset(f"Zu viele Punkte (mehr als {MAX_POINTS}).")
+        out.append(line)
+    return out
+
+
+def asset_from_json(kind, obj):
+    """Logo bzw. Kontur direkt aus JSON. Genau eine dieser Formen:
+
+    {"svg": "<svg …>…</svg>"}                 SVG als Text
+    {"dxf": "0\\nSECTION…"}                    DXF als Text
+    {"name": "logo.dwg", "base64": "…"}       beliebige Datei (SVG/DXF/DWG), Base64-kodiert
+    {"strokes": [[[x, y], [x, y], …], …]}     fertige Linien in mm
+    "name" ist überall erlaubt und nur bei base64 Pflicht (wegen der Dateiendung)."""
+    if not isinstance(obj, dict):
+        raise BadAsset("Objekt erwartet, z. B. {\"svg\": \"<svg …>\"} oder {\"strokes\": […]}.")
+    given = [k for k in ("svg", "dxf", "base64", "strokes") if obj.get(k) is not None]
+    if len(given) != 1:
+        raise BadAsset("Genau eines der Felder svg, dxf, base64 oder strokes angeben.")
+    unknown = [k for k in obj if k not in ("svg", "dxf", "base64", "strokes", "name")]
+    if unknown:
+        raise BadAsset("Unbekanntes Feld: " + ", ".join(map(str, unknown)))
+    form, value = given[0], obj[given[0]]
+    name = obj.get("name")
+    if name is not None and not isinstance(name, str):
+        raise BadAsset("name muss ein Text sein.")
+    name = os.path.basename(name or "")[:120]
+
+    if form == "strokes":
+        return _finish(kind, name or "strokes", _strokes_from_json(value), [])
+    if not isinstance(value, str) or not value.strip():
+        raise BadAsset(f"{form} muss ein nicht leerer Text sein.")
+    if form == "base64":
+        if not name:
+            raise BadAsset("Bei base64 ist name mit Dateiendung Pflicht (z. B. \"logo.svg\").")
+        try:
+            data = base64.b64decode(value, validate=True)
+        except (binascii.Error, ValueError):
+            raise BadAsset("base64 ist nicht gültig kodiert.")
+        return asset_from_file(kind, name, data)
+    if not name.lower().endswith("." + form):
+        name = (name or kind) + "." + form
+    return asset_from_file(kind, name, value.encode("utf-8"))

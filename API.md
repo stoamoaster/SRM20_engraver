@@ -1,11 +1,28 @@
-# SRM-20 Gravur – HTTP-API
+# SRM-20 Gravur – HTTP-API (v1)
 
-Mit dieser Schnittstelle können andere Programme die Gravur-App steuern: Schild berechnen,
-Vorschau und G-Code abholen, Logo und Werkstück-Kontur hochladen und den Auftrag an die Fräse schicken.
-Die Weboberfläche benutzt genau dieselben Endpunkte.
+Mit dieser Schnittstelle steuert ein anderes Programm die Gravur-App vollständig über JSON:
+Parameter schicken, Schild berechnen lassen, Fräsvorgang starten, Zustand abfragen, abbrechen.
 
-> ⚠️ **`POST /api/send` startet die Fräse sofort**, ohne Rückfrage. Es gibt keine Anmeldung und
-> keinen Not-Aus über die API. Vorher immer mit `/api/preview` prüfen und mit Modus `air` oder `outline` testen.
+> ⚠️ **`"start": true` bzw. `POST /api/v1/jobs/<id>/start` startet die Fräse sofort**, ohne Rückfrage.
+> Einen Not-Aus gibt es über die API nicht. Erst mit `mode: "outline"` oder `"air"` testen.
+
+---
+
+## Kurzfassung
+
+Ein einziger Aufruf genügt:
+
+```bash
+curl -X POST http://localhost:5000/api/v1/jobs -d "{\"text\": \"Max Muster\", \"depth\": 0.2, \"start\": true}"
+```
+
+Oder in zwei Schritten, erst berechnen und prüfen, dann starten:
+
+```
+POST /api/v1/jobs              {"text": "Max Muster"}      ->  job.id, job.warnings, job.minutes
+POST /api/v1/jobs/<id>/start                               ->  Fräse läuft
+GET  /api/v1/jobs/<id>                                     ->  job.state: queued | running | done …
+```
 
 ---
 
@@ -13,17 +30,56 @@ Die Weboberfläche benutzt genau dieselben Endpunkte.
 
 | | |
 |---|---|
-| **Basis-URL** | `http://<PC-mit-Fräse>:5000` (lokal: `http://localhost:5000`) |
-| **Format** | JSON. Anfragen mit Body brauchen `Content-Type: application/json`, sonst Antwort **415**. Ausnahme: Datei-Upload (multipart). |
+| **Basis-URL** | `http://<PC-mit-Fräse>:5000/api/v1` (lokal: `http://localhost:5000/api/v1`) |
+| **Format** | JSON rein, JSON raus. Der `Content-Type` der Anfrage ist egal, der Body wird immer als JSON gelesen. |
 | **Einheiten** | Längen in **mm**, Vorschub in **mm/min**, Drehzahl in **U/min**, Zeit in **Minuten** |
 | **Koordinaten** | Nullpunkt (0/0) = linke untere Ecke des Werkstücks, X nach rechts, Y nach oben. Z = 0 auf der Oberseite, negativ = ins Material. |
 | **Linien** | Eine Linie (*stroke*) ist eine Liste von Punkten `[[x, y], [x, y], …]`. Ein Bild ist eine Liste solcher Linien. |
-| **Wahrheitswerte** | `true`/`false`, auch `1`/`0` oder `"true"`, `"false"`, `"ja"`, `"nein"`, `"on"`, `"off"`. |
-| **Fehler** | Antwort `{"ok": false, "error": "Text auf Deutsch"}` mit Status 400 oder 500. |
-| **Anmeldung** | keine. Jeder im Netz, der Port 5000 erreicht, kann die API benutzen. |
+| **Wahrheitswerte** | `true`/`false`, auch `1`/`0` oder `"true"`, `"false"`, `"ja"`, `"nein"`, `"on"`, `"off"` |
+| **Zeitstempel** | ISO 8601 mit Zeitzone, z. B. `2026-11-10T13:53:46+01:00` |
 
-Alle Parameter sind optional. Fehlende oder ungültige Werte werden durch den Standardwert ersetzt.
-Zahlen außerhalb des erlaubten Bereichs werden auf die Grenze gesetzt, es gibt dafür keine Fehlermeldung.
+### Antworten
+
+Erfolg: immer `"ok": true` plus die Daten.
+
+```json
+{"ok": true, "job": { … }}
+```
+
+Fehler: `"ok": false` und ein `error`-Objekt. `code` ist stabil und für Programme gedacht,
+`message` ist ein deutscher Text für Menschen.
+
+```json
+{
+  "ok": false,
+  "error": {
+    "code": "invalid_parameters",
+    "message": "Ungültige Parameter – nichts berechnet, nichts gesendet.",
+    "details": [
+      {"field": "depth", "message": "muss höchstens 5 sein (ist 9)"},
+      {"field": "hight", "message": "unbekanntes Feld – meintest du „height“?"}
+    ]
+  }
+}
+```
+
+| Status | `code` | Bedeutung |
+|---|---|---|
+| 400 | `invalid_json` | Body fehlt oder ist kein JSON-Objekt |
+| 401 | `unauthorized` | API-Schlüssel fehlt oder ist falsch |
+| 404 | `not_found`, `job_not_found` | Endpunkt oder Auftrag gibt es nicht |
+| 409 | `blocked_by_warning` | Gravur liegt außerhalb des Werkstücks oder Werkstück zu groß. Mit `"force": true` trotzdem starten. |
+| 409 | `machine_busy` | Ein anderer Auftrag läuft noch. Mit `"queue": true` dahinter einreihen. |
+| 409 | `already_started`, `already_finished` | Auftrag wurde schon gestartet bzw. ist schon abgeschlossen |
+| 422 | `invalid_parameters` | Feld falsch, außerhalb der Grenzen oder unbekannt. Alle Fehler stehen in `details`. |
+| 422 | `nothing_to_engrave` | Kein Text und kein Logo |
+| 422 | `invalid_asset` | Logo oder Kontur nicht lesbar |
+| 502 | `send_failed` | Windows-Spooler hat den Auftrag abgelehnt |
+| 503 | `machine_unavailable`, `printer_not_found` | Senden nicht möglich bzw. Drucker nicht gefunden |
+
+**Strenge Prüfung:** Anders als die Weboberfläche korrigiert die API v1 nichts stillschweigend.
+Ein Wert außerhalb der Grenzen, ein falscher Typ oder ein unbekanntes Feld (Tippfehler) führt zu
+`invalid_parameters`, und es wird nichts berechnet und nichts gesendet. Fehlende Felder bekommen den Standardwert.
 
 ---
 
@@ -31,27 +87,233 @@ Zahlen außerhalb des erlaubten Bereichs werden auf die Grenze gesetzt, es gibt 
 
 | Methode | Pfad | Zweck |
 |---|---|---|
-| GET | `/api/info` | Schriften, Drucker, Vorlagen, geladenes Logo und geladene Kontur |
-| POST | `/api/preview` | Schild berechnen: Linien, Warnungen, G-Code, Dauer |
-| POST | `/api/send` | Schild berechnen **und an die Fräse senden** |
-| POST | `/api/upload/logo` | Logo hochladen (SVG/DXF/DWG) |
-| POST | `/api/upload/plate` | Werkstück-Kontur hochladen (SVG/DXF/DWG) |
-| DELETE | `/api/upload/logo` · `/api/upload/plate` | Logo bzw. Kontur entfernen |
-| POST | `/api/presets` | Werkstück-Vorlage speichern |
-| DELETE | `/api/presets?name=…` | Werkstück-Vorlage löschen |
-| GET | `/` | Weboberfläche (HTML) |
+| GET | `/api/v1` | Name, Version, Liste der Endpunkte |
+| GET | `/api/v1/status` | Fräse erreichbar? Drucker, laufende Aufträge, gespeichertes Logo/Kontur |
+| GET | `/api/v1/parameters` | Alle Auftrags-Parameter mit Typ, Standardwert und Grenzen, dazu die Schriften |
+| POST | `/api/v1/jobs` | Auftrag berechnen, mit `"start": true` **sofort fräsen** |
+| GET | `/api/v1/jobs` | Liste der Aufträge, neueste zuerst |
+| GET | `/api/v1/jobs/<id>` | Zustand eines Auftrags |
+| POST | `/api/v1/jobs/<id>/start` | Berechneten Auftrag **fräsen** |
+| POST | `/api/v1/jobs/<id>/cancel` | Auftrag abbrechen (gleichwertig: `DELETE /api/v1/jobs/<id>`) |
+| GET | `/api/v1/jobs/<id>/gcode` | G-Code als reiner Text |
+| GET · PUT · DELETE | `/api/v1/assets/logo` · `/api/v1/assets/plate` | Logo bzw. Werkstück-Kontur dauerhaft speichern |
+
+---
+
+## POST `/api/v1/jobs` – Auftrag anlegen
+
+Body: die [Auftrags-Parameter](#auftrags-parameter) und dazu diese Steuerfelder. Alles ist optional.
+
+| Feld | Typ | Standard | Bedeutung |
+|---|---|---|---|
+| `start` | bool | `false` | `true` = nach dem Berechnen sofort an die Fräse senden |
+| `force` | bool | `false` | Auch starten, wenn eine sperrende Warnung vorliegt (`outside`, `plate_too_large`) |
+| `queue` | bool | `false` | Auch starten, wenn noch ein anderer Auftrag läuft. Der neue wird dahinter eingereiht. |
+| `printer` | Text | automatisch | Druckername der Fräse. Ohne Angabe: `SRM20_PRINTER`, sonst der erste Drucker mit „SRM“ im Namen. |
+| `logo` | Objekt | gespeichertes Logo | Logo nur für diesen Auftrag, siehe [Logo und Kontur](#logo-und-kontur-als-json) |
+| `plate_contour` | Objekt | – | Werkstück-Umriss nur für diesen Auftrag. Ersetzt `plate_w`/`plate_h`/`plate_r`. |
+| `include` | Liste | `[]` | Zusätzlich in die Antwort aufnehmen: `"params"`, `"gcode"`, `"geometry"` |
+
+Beispiel:
+
+```json
+{
+  "text": "Max Muster",
+  "plate_w": 70, "plate_h": 50, "plate_r": 3,
+  "height": 10, "depth": 0.2,
+  "feed": 240, "rpm": 7000,
+  "mode": "engrave",
+  "start": true
+}
+```
+
+Antwort **201** mit dem Auftrag:
+
+```json
+{
+  "ok": true,
+  "job": {
+    "id": "942304c28c75",
+    "state": "queued",
+    "message": null,
+    "mode": "engrave",
+    "created": "2026-11-10T13:53:46+01:00",
+    "started": "2026-11-10T13:53:46+01:00",
+    "finished": null,
+    "printer": "Roland SRM-20",
+    "simulated": false,
+    "minutes": 1.84,
+    "gcode_lines": 262,
+    "warnings": [
+      {"code": "text_shrunk", "message": "Text zu breit – Schrifthöhe automatisch auf 8.3 mm verkleinert."}
+    ],
+    "can_start": false,
+    "needs_force": false,
+    "plate_size": [70, 50],
+    "text_height": 8.256,
+    "text_bbox": [3.033, 3.0, 66.967, 11.195],
+    "logo_area": null,
+    "links": {
+      "self": "/api/v1/jobs/942304c28c75",
+      "start": "/api/v1/jobs/942304c28c75/start",
+      "cancel": "/api/v1/jobs/942304c28c75/cancel",
+      "gcode": "/api/v1/jobs/942304c28c75/gcode"
+    }
+  }
+}
+```
+
+| Feld | Bedeutung |
+|---|---|
+| `id` | Kennung des Auftrags für alle weiteren Aufrufe |
+| `state` | Zustand, siehe [Zustände](#zustände) |
+| `message` | Hinweis zum Zustand, z. B. „Fräse offline oder nicht verbunden“ (`null` = nichts) |
+| `minutes` | Geschätzte Laufzeit |
+| `gcode_lines` | Zeilen im G-Code |
+| `warnings` | Hinweise mit stabilem `code` und deutschem Text, siehe [Warnungen](#warnungen) |
+| `can_start` | `true` = der Auftrag ist berechnet und kann gestartet werden |
+| `needs_force` | `true` = Start nur mit `"force": true` |
+| `plate_size` | `[Breite, Höhe]` des Werkstücks |
+| `text_height` | Tatsächliche Schrifthöhe nach der automatischen Verkleinerung (`null` ohne Text) |
+| `text_bbox` | Rahmen um den Text `[x0, y0, x1, y1]` (`null` ohne Text) |
+| `logo_area` | Freier Bereich fürs Logo `[x0, y0, x1, y1]` (`null` ohne Logo) |
+| `simulated` | `true` = der Server läuft im Simulationsmodus, es wurde nichts gesendet |
+| `params` | nur mit `include`: alle Parameter, wie sie tatsächlich verwendet wurden |
+| `gcode` | nur mit `include`: vollständiges NC-Programm |
+| `geometry` | nur mit `include`: `{"text": […], "logo": […], "plate": […]}` als Linien für eine eigene Vorschau |
+
+Schlägt bei `"start": true` nur der Start fehl (z. B. `machine_busy`), ist der Auftrag trotzdem
+berechnet. Er steht dann in `error.job` und lässt sich später mit `/start` starten.
+
+### Warnungen
+
+| `code` | Bedeutung | sperrt den Start |
+|---|---|---|
+| `outside` | Teile der Gravur liegen außerhalb des Werkstücks | **ja** (außer bei `mode: "outline"`) |
+| `plate_too_large` | Werkstück größer als der Arbeitsbereich (203,2 × 152,4 mm) | **ja** |
+| `near_edge` | Gravur näher als 0,5 mm am Rand | nein |
+| `text_shrunk` | Schrifthöhe wurde automatisch verkleinert | nein |
+| `missing_chars` | Zeichen fehlen in der Schrift und werden ausgelassen | nein |
+| `logo_no_space` | Kein Platz für das Logo | nein |
+| `logo_no_fill` | Logo hat keine geschlossenen Flächen, Füllen nicht möglich | nein |
+
+### Zustände
+
+| `state` | Bedeutung |
+|---|---|
+| `prepared` | Berechnet, noch nicht gestartet |
+| `queued` | In der Windows-Warteschlange, wartet |
+| `running` | Wird an die Fräse übertragen, die Fräse arbeitet |
+| `error` | Hängt in der Warteschlange, z. B. Fräse aus. Läuft weiter, sobald das Problem behoben ist. Grund steht in `message`. |
+| `done` | Vollständig an die Fräse übertragen |
+| `failed` | Konnte nicht gesendet werden, Grund in `message` |
+| `cancelled` | Abgebrochen |
+
+Wichtig:
+- Der Zustand kommt aus der Windows-Druckwarteschlange. `done` heißt: Der Auftrag ist dort verschwunden,
+  die Fräse hat also alle Daten erhalten. Die Maschine selbst meldet nichts zurück. Wie genau `done`
+  mit dem Ende der Fräsbewegung zusammenfällt, ist noch nicht an der echten Maschine gemessen.
+- `queued`, `running` und `error` belegen die Fräse. Solange gibt ein weiterer Start `machine_busy`.
+- Die Aufträge liegen nur im Arbeitsspeicher (die letzten 100) und sind nach einem Neustart des Servers weg.
+
+---
+
+## POST `/api/v1/jobs/<id>/start` – Fräsen
+
+Startet einen berechneten Auftrag (`state: "prepared"`). Body optional:
+
+```json
+{"force": false, "queue": false, "printer": "Roland SRM-20"}
+```
+
+Antwort: `{"ok": true, "job": { … }}` mit dem neuen Zustand. Jeder Auftrag lässt sich nur einmal starten.
+Für eine Wiederholung einen neuen Auftrag anlegen.
+
+## GET `/api/v1/jobs/<id>` – Zustand abfragen
+
+Antwort wie oben. Mit `?include=gcode,geometry,params` kommen die großen Felder dazu.
+Zum Warten auf das Ende alle paar Sekunden abfragen, bis `state` `done`, `failed` oder `cancelled` ist.
+
+## POST `/api/v1/jobs/<id>/cancel` – Abbrechen
+
+```json
+{"ok": true, "removed_from_queue": true, "job": {"state": "cancelled", "…": "…"}}
+```
+
+- Ein Auftrag im Zustand `prepared` wird einfach verworfen.
+- Ein wartender Auftrag wird aus der Windows-Warteschlange genommen (`removed_from_queue: true`).
+- **Was die Fräse schon erhalten hat, fräst sie weiter.** Dann ist `removed_from_queue` `false`
+  und `job.message` sagt es. Anhalten geht nur in VPanel oder mit der VIEW-Taste an der Maschine.
+
+## GET `/api/v1/jobs/<id>/gcode`
+
+Das NC-Programm als `text/plain`, z. B. zum Speichern als `.nc`.
+
+---
+
+## GET `/api/v1/status`
+
+```json
+{
+  "ok": true,
+  "version": "1.0",
+  "machine": {
+    "can_send": true,
+    "simulate": false,
+    "printer": "Roland SRM-20",
+    "printers": ["Roland SRM-20", "Adobe PDF"],
+    "busy": false,
+    "active_jobs": []
+  },
+  "assets": {
+    "logo": {"name": "logo.svg", "notes": [], "size": [36.0, 10.0]},
+    "plate": null
+  }
+}
+```
+
+| Feld | Bedeutung |
+|---|---|
+| `can_send` | `false` = Senden nicht möglich (kein Windows oder pywin32 fehlt). Berechnen geht trotzdem. |
+| `simulate` | `true` = Simulationsmodus, siehe [Betrieb](#betrieb) |
+| `printer` | Drucker, der ohne Angabe von `printer` benutzt wird. `null` = keiner gefunden. |
+| `printers` | Alle Windows-Drucker. Einträge mit „SRM“ im Namen stehen vorne. |
+| `busy`, `active_jobs` | Läuft gerade ein Auftrag dieser App? Aufträge anderer Programme (z. B. VPanel) sieht die App nicht. |
+| `assets` | Gespeichertes Logo bzw. gespeicherte Kontur (`null` = keine) |
+
+Der erste Aufruf kann einige Sekunden dauern, weil Windows die Drucker auflistet. Danach gilt die Liste 10 Sekunden.
+
+## GET `/api/v1/parameters`
+
+Liefert die Parameter-Tabelle maschinenlesbar, z. B. um Eingabefelder zu bauen oder vorab zu prüfen.
+
+```json
+{
+  "ok": true,
+  "parameters": [
+    {"name": "depth", "type": "number", "default": 0.2, "group": "milling",
+     "description": "Frästiefe Text", "min": 0.01, "max": 5, "unit": "mm"},
+    {"name": "mode", "type": "choice", "default": "engrave", "group": "milling",
+     "description": "…", "choices": ["engrave", "air", "outline"]}
+  ],
+  "fonts": {"relief": "Relief SingleLine (empfohlen)", "…": "…"},
+  "presets": [{"name": "Platte 70 × 50 mm", "w": 70, "h": 50, "r": 3, "builtin": true}],
+  "work_area": {"x": 203.2, "y": 152.4}
+}
+```
+
+`type` ist `number`, `integer`, `boolean`, `string` oder `choice`. `default: null` heißt: Der Wert
+richtet sich nach einem anderen Feld (`logo_depth`, `fill_step`).
 
 ---
 
 ## Auftrags-Parameter
 
-Diese Felder gelten für **`/api/preview`** und **`/api/send`** (bei `send` kommt noch `printer` dazu).
-
 ### Werkstück
 
 | Feld | Typ | Standard | Bereich | Bedeutung |
 |---|---|---|---|---|
-| `plate_src` | Text | `"rect"` | `rect`, `file` | `rect` = Platte mit runden Ecken aus den Maßen unten. `file` = hochgeladene Kontur (siehe `/api/upload/plate`). Ist keine Kontur geladen, wird `rect` benutzt. |
+| `plate_src` | Text | `"rect"` | `rect`, `file` | `rect` = Platte mit runden Ecken aus den Maßen unten. `file` = gespeicherte Kontur (`PUT /api/v1/assets/plate`). Mit `plate_contour` im Auftrag ist das Feld unnötig. |
 | `plate_w` | Zahl | 70 | 5–1000 | Breite (X) |
 | `plate_h` | Zahl | 50 | 5–1000 | Höhe (Y) |
 | `plate_r` | Zahl | 3 | 0–500 | Eckradius |
@@ -61,7 +323,7 @@ Diese Felder gelten für **`/api/preview`** und **`/api/send`** (bei `send` komm
 | Feld | Typ | Standard | Bereich | Bedeutung |
 |---|---|---|---|---|
 | `text` | Text | `""` | max. 200 Zeichen | Gravurtext, Zeilenumbruch mit `\n` |
-| `font` | Text | `"relief"` | Schlüssel aus `/api/info` → `fonts` | Schrift (siehe unten) |
+| `font` | Text | `"relief"` | Schlüssel aus `/api/v1/parameters` → `fonts` | Schrift (siehe unten) |
 | `height` | Zahl | 10 | 0,5–100 | Höhe der Großbuchstaben |
 | `spacing_mode` | Text | `"optical"` | `optical`, `font` | `optical` = Abstände nach der Form der Buchstaben gleichmäßig ausgleichen (siehe unten). `font` = Abstände und Kerning wie in der Schrift festgelegt. |
 | `tracking` | Zahl | 35 | 0–150 | Laufweite bei `optical`: Ziel-Lücke zwischen zwei Buchstaben in % der Schrifthöhe. 35 ergibt etwa die gleiche Textbreite wie `font`. |
@@ -90,13 +352,13 @@ mindestens 35 % der Ziel-Lücke breit, damit sich keine Buchstaben berühren. Pr
 | `allure` | EMS Allure | SVG, Schreibschrift |
 | `futural`, `futuram`, `rowmans`, `rowmand`, `scripts`, `timesr` | Hershey-Schriften | grobes Raster, ohne Umlaute (werden aus Buchstabe + Strichen gebaut), ohne € |
 
-Die SVG-Schriften liegen im Ordner `fonts/`. Fehlt eine Datei, taucht die Schrift in `/api/info` nicht auf.
+Die SVG-Schriften liegen im Ordner `fonts/`. Fehlt eine Datei, taucht die Schrift in `/api/v1/parameters` nicht auf.
 
 ### Logo
 
 | Feld | Typ | Standard | Bereich | Bedeutung |
 |---|---|---|---|---|
-| `logo_on` | bool | `true` | | Logo gravieren (nur wenn eines hochgeladen ist) |
+| `logo_on` | bool | `true` | | Logo gravieren (nur wenn eines gespeichert ist oder im Auftrag mitkommt) |
 | `logo_gap` | Zahl | 3 | ≥ 0 | Abstand zwischen Textoberkante und Logo-Bereich |
 | `margin_top` | Zahl | 3 | ≥ 0 | Rand oben |
 | `logo_scale` | Zahl | 100 | 1–1000 | Größe in %. 100 = so groß, wie es in den freien Bereich passt. |
@@ -108,6 +370,8 @@ Die SVG-Schriften liegen im Ordner `fonts/`. Fehlt eine Datei, taucht die Schrif
 
 Der Logo-Bereich reicht von `margin_side` bis Breite − `margin_side` und von Textoberkante + `logo_gap`
 bis Höhe − `margin_top`. Das Logo wird mit gleichem Seitenverhältnis eingepasst und mittig gesetzt.
+
+> Ist ein Logo gespeichert, wird es bei **jedem** Auftrag mitgraviert. Wer das nicht will, schickt `"logo_on": false`.
 
 ### Fräsen
 
@@ -125,217 +389,166 @@ bis Höhe − `margin_top`. Das Logo wird mit gleichem Seitenverhältnis eingepa
 | `park_x` | Zahl | 33,7 | −203,2–203,2 | Parkposition X im gewählten Koordinatensystem (`wcs`) |
 | `park_y` | Zahl | 121,8 | −152,4–152,4 | Parkposition Y im gewählten Koordinatensystem |
 | `park_z` | Zahl | 57,5 | 0–70 | Parkposition Z im gewählten Koordinatensystem. Nie tiefer als `safe_z`. |
-
-Die Standardwerte sind die VIEW-Position der SRM-20, gemessen im G54-System. Weil sie sich auf den
-Werkstück-Nullpunkt beziehen, verschieben sie sich mit ihm. Bei einem stark anderen Nullpunkt die Werte anpassen.
 | `line_w` | Zahl | 0,3 | 0,05–5 | Linienbreite. Nur für die Vorschau und als Standard für `fill_step`. |
 
+Die Standardwerte der Parkposition sind die VIEW-Position der SRM-20, gemessen im G54-System. Weil sie sich auf den
+Werkstück-Nullpunkt beziehen, verschieben sie sich mit ihm. Bei einem stark anderen Nullpunkt die Werte anpassen.
+
 ---
 
-## GET `/api/info`
+## Logo und Kontur als JSON
 
-Liefert alles, was man zum Ausfüllen eines Auftrags braucht. Kann **einige Sekunden** dauern, weil Windows die Drucker auflistet.
+Logo und Werkstück-Kontur haben überall dieselbe Form. Genau **eines** der Felder `svg`, `dxf`, `base64`, `strokes` angeben:
 
 ```json
-{
-  "fonts":    {"relief": "Relief SingleLine (empfohlen)", "readability": "EMS Readability (schlicht)", "…": "…"},
-  "printers": ["Roland SRM-20", "Adobe PDF"],
-  "windows":  true,
-  "presets":  [{"name": "Platte 70 × 50 mm", "w": 70, "h": 50, "r": 3, "builtin": true}],
-  "assets":   {"logo": {"name": "logo.svg", "notes": []}, "plate": null}
-}
+{"svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" …>…</svg>"}
+{"dxf": "0\nSECTION\n…"}
+{"name": "logo.dwg", "base64": "QUMxMDMy…"}
+{"strokes": [[[0, 0], [80, 0], [80, 40], [0, 40], [0, 0]]]}
 ```
 
 | Feld | Bedeutung |
 |---|---|
-| `fonts` | Schlüssel → Anzeigename. Der Schlüssel kommt in `font`. (JSON-Objekt, Reihenfolge nicht garantiert) |
-| `font_list` | Dieselben Schriften als `[[Schlüssel, Anzeigename], …]` in sinnvoller Reihenfolge |
-| `default_font` | Schlüssel der Standardschrift (`relief`) |
-| `printers` | Windows-Drucker. Einträge mit „SRM“ im Namen stehen vorne. Leer, wenn pywin32 fehlt. |
-| `windows` | `false` = Senden nicht möglich (nur Vorschau und G-Code) |
-| `presets` | Werkstück-Vorlagen. `builtin: true` = eingebaut, nicht löschbar. |
-| `assets` | Geladenes Logo bzw. geladene Kontur (`null` = keine). `notes` = Hinweise vom Import. |
+| `svg` | SVG-Datei als Text |
+| `dxf` | DXF-Datei als Text |
+| `base64` | Beliebige Datei (SVG, DXF, DWG) Base64-kodiert. Dann ist `name` mit Dateiendung Pflicht. |
+| `strokes` | Fertige Linien in mm |
+| `name` | Anzeigename, optional |
 
----
-
-## POST `/api/preview`
-
-Berechnet das Schild, sendet aber **nichts**. Body: Auftrags-Parameter (siehe oben).
-
-```json
-{
-  "text":        [[[29.524, 13.0], [29.524, 3.0]], "…"],
-  "logo":        [],
-  "plate":       [[[67.0, 0.0], [67.392, 0.026], "…"]],
-  "plate_size":  [70.0, 50.0],
-  "logo_area":   [3.0, 16.0, 67.0, 47.0],
-  "text_height": 10.0,
-  "text_bbox":   [29.52, 3.0, 40.48, 13.48],
-  "warnings":    [],
-  "minutes":     0.55,
-  "lines":       33,
-  "gcode":       "%\nG17 G21 G90\nG40 G49 G80\nG54\n…"
-}
-```
-
-| Feld | Bedeutung |
-|---|---|
-| `text`, `logo` | Gravierlinien in Werkstückkoordinaten (mm, auf 3 Stellen gerundet). Bei `logo_fill` sind die Füll-Linien in `logo` enthalten. |
-| `plate` | Umriss des Werkstücks als Linien |
-| `plate_size` | `[Breite, Höhe]` |
-| `logo_area` | Freier Bereich fürs Logo `[x0, y0, x1, y1]`, oder `null` ohne Logo |
-| `text_height` | Tatsächliche Schrifthöhe nach der automatischen Verkleinerung (`null` ohne Text) |
-| `text_bbox` | Rahmen um den Text `[x0, y0, x1, y1]` (`null` ohne Text) |
-| `warnings` | Hinweise auf Deutsch, z. B. Text verkleinert, zu nah am Rand, **außerhalb des Werkstücks**, Zeichen fehlt in der Schrift |
-| `minutes` | Geschätzte Laufzeit |
-| `lines` | Zeilen im G-Code |
-| `gcode` | Vollständiges NC-Programm. Kann auch selbst gespeichert werden, z. B. als `.nc`. |
-
-**Tipp:** Vor dem Senden `warnings` prüfen. Enthält eine Warnung „AUSSERHALB“, besser nicht senden.
-
----
-
-## POST `/api/send`
-
-Wie `/api/preview`, schickt den G-Code aber zusätzlich als RAW-Druckauftrag an die Fräse.
-
-Zusätzliches Pflichtfeld:
-
-| Feld | Typ | Bedeutung |
-|---|---|---|
-| `printer` | Text | Exakter Druckername aus `/api/info` → `printers` |
-
-Antwort bei Erfolg:
-
-```json
-{"ok": true, "minutes": 2.68}
-```
-
-| Status | `error` | Ursache |
-|---|---|---|
-| 400 | `pywin32 fehlt oder kein Windows – senden nicht möglich.` | Server läuft nicht unter Windows oder ohne pywin32 |
-| 400 | `Drucker nicht gefunden.` | `printer` fehlt oder ist falsch geschrieben |
-| 400 | `Nichts zu gravieren.` | Kein Text und kein Logo (bei `mode: "outline"` ist das erlaubt) |
-| 500 | Meldung des Druckspoolers | z. B. Fräse aus oder nicht verbunden |
-
-Wichtig:
-- `ok: true` heißt nur, dass der Auftrag beim Windows-Spooler angekommen ist. Ob die Fräse fertig ist, meldet die API **nicht**.
-- Mehrere `send`-Aufrufe landen hintereinander in der Warteschlange und werden alle ausgeführt.
-- Abbrechen geht nur in VPanel oder mit der VIEW-Taste an der Maschine.
-- In VPanel muss der Befehlssatz **NC-Code** sein und der Nullpunkt im passenden Koordinatensystem (`wcs`) gesetzt.
-
----
-
-## POST `/api/upload/logo` · `/api/upload/plate`
-
-Lädt eine Datei hoch. Sie wird auf dem Server gespeichert (`data/logo.json` bzw. `data/plate.json`),
-gilt **für alle Benutzer** und bleibt nach einem Neustart erhalten. Ein neuer Upload ersetzt den alten.
-
-- Format: `multipart/form-data`, Feldname **`file`**, max. 25 MB
-- Dateitypen: `.svg`, `.dxf`, `.dwg`. DWG geht nur, wenn der „ODA File Converter“ installiert ist.
 - Die linke untere Ecke der Zeichnung wird auf 0/0 verschoben.
-- `plate`: Es werden nur geschlossene Linien übernommen. Danach `plate_src: "file"` setzen, damit die Kontur benutzt wird.
-- Texte in der Datei werden ausgelassen (vorher in Kurven umwandeln). Das steht dann in `notes`.
+- Kontur: Es zählen nur geschlossene Linien. Ihre Größe ist die echte Werkstückgröße.
+- Das Logo wird ohnehin in den freien Bereich eingepasst, seine Größe in der Datei ist egal.
+- Texte in der Datei werden ausgelassen (vorher in Kurven umwandeln). DWG braucht den „ODA File Converter“.
+- Maximal 25 MB pro Anfrage.
+
+Zwei Wege:
+
+**1. Im Auftrag mitschicken** (gilt nur für diesen Auftrag, nichts wird gespeichert):
 
 ```json
-{"ok": true, "name": "logo.svg", "size": [36.0, 10.0], "notes": ["Nicht übernommen: 1× Text (Texte vorher in Kurven umwandeln)"]}
+{"text": "Max Muster", "logo": {"svg": "<svg …>"}, "plate_contour": {"strokes": [[[0,0],[80,0],[80,40],[0,40],[0,0]]]}}
 ```
 
-`size` = Größe der Zeichnung in mm, so wie in der Datei. Das Logo wird später ohnehin eingepasst.
-Bei der Kontur ist das die echte Werkstückgröße.
+**2. Dauerhaft speichern** (gilt für alle folgenden Aufträge und für die Weboberfläche):
 
-Fehler (400): unbekannter Typ, keine Datei, Dateityp nicht unterstützt, Datei nicht lesbar,
-keine verwendbaren Linien, keine geschlossene Kontur (nur bei `plate`).
+| Methode | Pfad | Body | Antwort |
+|---|---|---|---|
+| PUT | `/api/v1/assets/logo` · `/api/v1/assets/plate` | Objekt wie oben | `{"ok": true, "asset": {"name": …, "notes": […], "size": [b, h]}}` |
+| GET | dieselben Pfade | – | `{"ok": true, "asset": {…}}` oder `"asset": null`. Mit `?include=geometry` samt `strokes`. |
+| DELETE | dieselben Pfade | – | `{"ok": true, "asset": null}` |
 
-## DELETE `/api/upload/logo` · `/api/upload/plate`
-
-Entfernt Logo bzw. Kontur. Antwort: `{"ok": true}`, auch wenn nichts geladen war.
-
----
-
-## POST `/api/presets`
-
-Speichert eine Werkstück-Vorlage. Gibt es den Namen schon, wird die Vorlage überschrieben.
-Eingebaute Namen sind gesperrt.
-
-```json
-{"name": "Platte 100 × 60 mm", "w": 100, "h": 60, "r": 5}
-```
-
-Antwort: `{"ok": true, "presets": [ …alle Vorlagen… ]}`. Fehler (400): `Name fehlt.` / `Name ist schon vergeben.`
-
-## DELETE `/api/presets?name=<Name>`
-
-Löscht eine eigene Vorlage (Name URL-kodiert). Antwort: `{"ok": true, "presets": [ … ]}`.
-Eingebaute Vorlagen bleiben erhalten.
-
-> Vorlagen sind nur eine Merkhilfe. Für einen Auftrag zählen immer `plate_w`, `plate_h` und `plate_r`.
+`notes` enthält Hinweise vom Import, z. B. ausgelassene Texte oder ignorierte offene Linien.
+Eine gespeicherte Kontur wird nur benutzt, wenn der Auftrag `"plate_src": "file"` setzt.
 
 ---
 
 ## Beispiele
 
+### Python
+
+```python
+import time
+import requests
+
+API = "http://localhost:5000/api/v1"
+
+def call(method, path, **json):
+    r = requests.request(method, API + path, json=json or None, timeout=60).json()
+    if not r["ok"]:
+        raise SystemExit(f"{r['error']['code']}: {r['error']['message']}")
+    return r
+
+# 1) Ist die Fräse frei?
+m = call("GET", "/status")["machine"]
+assert m["can_send"] and m["printer"] and not m["busy"], m
+
+# 2) Auftrag berechnen und prüfen
+job = call("POST", "/jobs", text="Max Muster", height=10, depth=0.2, feed=240,
+           logo={"svg": open("logo.svg", encoding="utf-8").read()})["job"]
+print(f"Dauer ca. {job['minutes']} min")
+for w in job["warnings"]:
+    print("Warnung:", w["message"])
+
+# 3) Fräsen
+job = call("POST", f"/jobs/{job['id']}/start")["job"]
+
+# 4) Warten, bis alles übertragen ist
+while job["state"] in ("queued", "running", "error"):
+    time.sleep(3)
+    job = call("GET", f"/jobs/{job['id']}")["job"]
+print("Ergebnis:", job["state"], job["message"] or "")
+```
+
 ### curl
 
 ```bash
-# Vorschau
-curl -s -X POST http://localhost:5000/api/preview \
-     -H "Content-Type: application/json" \
-     -d '{"text": "Max Muster", "height": 10, "depth": 0.2}'
+# Zustand
+curl http://localhost:5000/api/v1/status
 
-# Logo hochladen
-curl -s -F "file=@logo.svg" http://localhost:5000/api/upload/logo
+# Erst nur den Umriss in der Luft abfahren (Nullpunkt prüfen)
+curl -X POST http://localhost:5000/api/v1/jobs -d '{"mode": "outline", "start": true}'
 
-# Erst Umriss in der Luft abfahren, dann gravieren
-curl -s -X POST http://localhost:5000/api/send -H "Content-Type: application/json" \
-     -d '{"text": "Max Muster", "mode": "outline", "printer": "Roland SRM-20"}'
+# Gravieren
+curl -X POST http://localhost:5000/api/v1/jobs -d '{"text": "Max Muster", "depth": 0.2, "start": true}'
+
+# Abbrechen
+curl -X POST http://localhost:5000/api/v1/jobs/942304c28c75/cancel
 ```
 
 Unter Windows-`cmd` die Anführungszeichen im JSON als `\"` schreiben oder das JSON aus einer Datei lesen (`-d @auftrag.json`).
 
-### Python
+### JavaScript
 
-```python
-import requests
-
-BASE = "http://localhost:5000"
-
-info = requests.get(f"{BASE}/api/info", timeout=30).json()
-printer = next(p for p in info["printers"] if "srm" in p.lower())
-
-with open("logo.svg", "rb") as f:
-    r = requests.post(f"{BASE}/api/upload/logo", files={"file": f}, timeout=60).json()
-    assert r["ok"], r["error"]
-
-job = {
-    "text": "Max Muster",
-    "plate_w": 70, "plate_h": 50, "plate_r": 3,
-    "height": 10, "text_bottom": 3,
-    "depth": 0.2, "logo_depth": 0.15,
-    "feed": 240, "rpm": 7000,
-    "wcs": "G54",
-}
-
-prev = requests.post(f"{BASE}/api/preview", json=job, timeout=60).json()
-print(f"Dauer ca. {prev['minutes']:.1f} min", *prev["warnings"], sep="\n")
-if any("AUSSERHALB" in w for w in prev["warnings"]):
-    raise SystemExit("Gravur liegt außerhalb des Werkstücks")
-
-# G-Code nur speichern ...
-open("gravur.nc", "w").write(prev["gcode"])
-
-# ... oder direkt an die Fräse
-r = requests.post(f"{BASE}/api/send", json={**job, "mode": "engrave", "printer": printer}, timeout=60).json()
-print("gesendet" if r["ok"] else r["error"])
+```js
+const r = await fetch("http://localhost:5000/api/v1/jobs", {
+  method: "POST",
+  body: JSON.stringify({text: "Max Muster", depth: 0.2, start: true}),
+}).then(r => r.json());
+if (!r.ok) throw new Error(r.error.message);
+console.log(r.job.id, r.job.state);
 ```
+
+Aus einer Webseite im Browser geht das nur, wenn der Server mit `SRM20_CORS` gestartet wurde (siehe unten).
 
 ---
 
-## Hinweise für den Betrieb
+## Betrieb
 
-- Der Server lauscht auf allen Netzwerkkarten (Port 5000). Wer die Fräse nicht für das ganze Netz
-  freigeben will, sperrt den Port in der Windows-Firewall oder startet mit `host="127.0.0.1"` (am Ende von `app.py`).
-- Logo, Kontur und Vorlagen liegen gemeinsam im Ordner `data/`. Mehrere Programme, die gleichzeitig
-  verschiedene Logos hochladen, überschreiben sich gegenseitig.
-- Einstellungen der Weboberfläche (Text, Tiefe usw.) speichert nur der Browser. Die API kennt sie nicht,
-  jeder Aufruf muss seine Parameter selbst mitschicken.
+Einstellungen über Umgebungsvariablen, vor dem Start setzen (in `start.bat` z. B. `set SRM20_PORT=8080`):
+
+| Variable | Standard | Bedeutung |
+|---|---|---|
+| `SRM20_HOST` | `0.0.0.0` | Netzwerkadresse. `127.0.0.1` = nur dieser PC. |
+| `SRM20_PORT` | `5000` | Port |
+| `SRM20_API_KEY` | – | Wenn gesetzt, brauchen Zugriffe von **anderen Rechnern** den Header `X-API-Key: <Schlüssel>` (oder `Authorization: Bearer <Schlüssel>`). Zugriffe vom PC selbst bleiben frei. Gilt auch für die Weboberfläche auf anderen Geräten. |
+| `SRM20_PRINTER` | – | Druckername der Fräse, falls er nicht „SRM“ enthält |
+| `SRM20_SIMULATE` | – | `1` = **Simulation**: Es wird nichts gesendet. Der G-Code landet in `data/simulated/`, der Auftrag ist sofort `done` und trägt `simulated: true`. Gut zum Entwickeln der externen App ohne Fräse. |
+| `SRM20_CORS` | – | Erlaubte Herkunft für Browser-Apps, z. B. `http://localhost:3000`. `*` erlaubt jede Webseite und ist riskant, weil dann jede geöffnete Seite die Fräse starten kann. |
+
+Hinweise:
+- Ohne `SRM20_API_KEY` kann jeder im Netz, der den Port erreicht, die Fräse starten. Die Verbindung ist
+  unverschlüsselt (HTTP), der Schlüssel schützt also nur in einem vertrauenswürdigen Netz.
+- In VPanel muss der Befehlssatz **NC-Code** sein und der Nullpunkt im passenden Koordinatensystem (`wcs`) gesetzt.
+- Gespeichertes Logo, Kontur und Vorlagen liegen im Ordner `data/` und gelten für alle. Programme, die
+  gleichzeitig verschiedene Logos brauchen, schicken sie besser im Auftrag mit (`logo`).
+
+---
+
+## Ältere Endpunkte (Weboberfläche)
+
+Die Weboberfläche benutzt weiter die Endpunkte der ersten Version. Sie bleiben erhalten, neue Programme
+sollten aber `/api/v1` verwenden.
+
+| Methode | Pfad | Zweck |
+|---|---|---|
+| GET | `/api/info` | Schriften, Drucker, Vorlagen, gespeichertes Logo/Kontur |
+| POST | `/api/preview` | Schild berechnen: Linien, Warnungen (als Texte), G-Code, Dauer |
+| POST | `/api/send` | Berechnen und senden. Antwort `{"ok": true, "minutes": …, "job": "<id>"}` |
+| POST · DELETE | `/api/upload/logo` · `/api/upload/plate` | Datei-Upload als `multipart/form-data`, Feldname `file` |
+| POST | `/api/presets` | Werkstück-Vorlage speichern: `{"name": …, "w": …, "h": …, "r": …}` |
+| DELETE | `/api/presets?name=…` | Werkstück-Vorlage löschen |
+
+Unterschiede zu v1: Diese Endpunkte brauchen `Content-Type: application/json`, ersetzen ungültige Werte
+stillschweigend durch den Standardwert bzw. die Grenze, kennen keine Sperre bei Warnungen und reihen
+mehrere Aufträge einfach hintereinander ein. Fehler kommen als `{"ok": false, "error": "Text"}`.
+Ein mit `/api/send` gestarteter Auftrag ist auch unter `/api/v1/jobs/<id>` sichtbar.

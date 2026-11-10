@@ -72,4 +72,25 @@ Abbrechen: in VPanel oder mit der VIEW-Taste an der Maschine.
   (Windows-Firewall fragt beim ersten Start).
 
 ## Steuerung durch andere Programme
-Die App hat eine HTTP-API (JSON). Beschreibung aller Endpunkte und Parameter: [API.md](API.md)
+Die App lässt sich vollständig über eine HTTP-API (JSON) steuern, vom Schicken der Parameter bis
+zum Start des Fräsvorgangs. Ein Aufruf genügt:
+
+```bash
+curl -X POST http://localhost:5000/api/v1/jobs -d "{\"text\": \"Max Muster\", \"start\": true}"
+```
+
+Beschreibung aller Endpunkte und Parameter: [API.md](API.md)
+
+Zum Entwickeln ohne Fräse: vor dem Start `set SRM20_SIMULATE=1` setzen. Dann wird nichts gesendet,
+der G-Code landet in `data/simulated/`.
+
+## Aufbau des Programms
+| Datei | Aufgabe |
+|---|---|
+| `app.py` | Webserver: Weboberfläche und API |
+| `engraving.py` | Rechenkern: Text setzen, Geometrie, Schild aufbauen, G-Code |
+| `params.py` | Tabelle aller Auftrags-Parameter mit Standardwerten, Grenzen und Prüfung |
+| `jobs.py` | Aufträge: berechnen, starten, Zustand verfolgen, abbrechen |
+| `machine.py` | Verbindung zur Fräse über den Windows-Drucker, Simulationsmodus |
+| `store.py` | Gespeichertes Logo, Kontur und Vorlagen im Ordner `data/` |
+| `importer.py`, `svgfont.py` | Einlesen von SVG/DXF/DWG und der SVG-Schriften |
