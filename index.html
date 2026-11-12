@@ -101,9 +101,13 @@ pre{max-height:260px;overflow:auto;background:#1c1c1a;color:#e8e6df;padding:10px
 
 <details class="card" open><summary>Logo</summary>
   <label class="chk" style="margin-top:4px"><input type="checkbox" id="logo_on" checked> Logo gravieren</label>
+  <label>Standard-Logo</label>
+  <select id="libsel"><option value="">– auswählen –</option></select>
   <div class="file"><span class="name" id="logo_name">kein Logo geladen</span>
     <button class="sec" data-up="logo">Datei wählen…</button><button class="sec" data-rm="logo">✕</button></div>
-  <p class="note">SVG, DXF oder DWG. Wird automatisch in den freien Platz über dem Text eingepasst.</p>
+  <button class="sec wide" data-up="lib">Datei zu den Standard-Logos hinzufügen…</button>
+  <p class="note">SVG, DXF oder DWG. Wird automatisch in den freien Platz über dem Text eingepasst.
+    Standard-Logos liegen im Ordner <b>logos/</b> im Programmordner – Dateien einfach dort hineinkopieren.</p>
   <div class="row">
     <div><label>Abstand zum Text</label><input id="logo_gap" type="number" value="3" step="0.5" min="0"></div>
     <div><label>Rand oben</label><input id="margin_top" type="number" value="3" step="0.5" min="0"></div>
@@ -196,7 +200,12 @@ async function info(){
   if(r.printers.length){$("printer").innerHTML=r.printers.map(n=>`<option>${esc(n)}</option>`).join("");$("send").disabled=false}
   else{$("printer").innerHTML="<option value=''>keine Drucker gefunden</option>";$("send").disabled=true;
     if(!r.windows)$("msg").textContent="Senden nur unter Windows mit pywin32 möglich – Vorschau und Download funktionieren."}
-  showAssets(r.assets);setPresets(r.presets);
+  showAssets(r.assets);setPresets(r.presets);setLibrary(r.library,r.assets.logo);
+}
+function setLibrary(list,cur){
+  list=list||[]; // ältere Server liefern keine Liste
+  $("libsel").innerHTML=`<option value="">${list.length?"– auswählen –":"– Ordner logos/ ist leer –"}</option>`+list.map(n=>`<option>${esc(n)}</option>`).join("");
+  $("libsel").value=cur&&list.includes(cur.name)?cur.name:"";
 }
 function showAssets(a){
   for(const k of ["logo","plate"]){
@@ -281,15 +290,28 @@ $("psave").onclick=async()=>{const name=prompt("Name der Vorlage:",`Platte ${$("
 $("pdel").onclick=async()=>{const p=presets[+$("preset").value];if(!p||p.builtin)return;if(!confirm(`Vorlage „${p.name}“ löschen?`))return;
   const r=await api("/api/presets?name="+encodeURIComponent(p.name),{method:"DELETE"});setPresets(r.presets)};
 
+$("libsel").addEventListener("focus",async()=>{ // neu in den Ordner kopierte Dateien sofort anzeigen
+  const r=await api("/api/logos"),cur=$("libsel").value;if(!r.ok)return;
+  if(r.logos.join("|")!==[...$("libsel").options].slice(1).map(o=>o.value).join("|")){
+    setLibrary(r.logos,cur?{name:cur}:null)}});
+$("libsel").onchange=async()=>{
+  const name=$("libsel").value;if(!name)return;
+  const r=await api("/api/logos/use",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({name})});
+  if(r.ok){$("logo_on").checked=true;$("msg").innerHTML=`<span style="color:var(--ok)">✓ Standard-Logo ${esc(r.name)} (${r.size[0]} × ${r.size[1]} mm)</span>`}
+  else $("msg").innerHTML=`<span style="color:var(--acc)">Fehler: ${esc(r.error)}</span>`;
+  await info();schedule()};
 let upKind=null;
 document.querySelectorAll("[data-up]").forEach(b=>b.onclick=()=>{upKind=b.dataset.up;$("fileinput").value="";$("fileinput").click()});
 document.querySelectorAll("[data-rm]").forEach(b=>b.onclick=async()=>{await api("/api/upload/"+b.dataset.rm,{method:"DELETE"});await info();schedule()});
 $("fileinput").onchange=async()=>{
   const f=$("fileinput").files[0];if(!f||!upKind)return;
   const fd=new FormData();fd.append("file",f);$("msg").textContent=`Lade ${f.name}…`;
-  let r;try{r=await api("/api/upload/"+upKind,{method:"POST",body:fd})}catch(e){r={ok:false,error:"Upload fehlgeschlagen (Datei zu groß?)"}}
+  const url=upKind==="lib"?"/api/logos":"/api/upload/"+upKind;
+  let r;try{r=await api(url,{method:"POST",body:fd})}catch(e){r={ok:false,error:"Upload fehlgeschlagen (Datei zu groß?)"}}
+  if(!r.ok&&r.exists&&confirm(r.error+" Überschreiben?")){
+    const fd2=new FormData();fd2.append("file",f);r=await api(url+"?overwrite=1",{method:"POST",body:fd2})}
   if(r.ok){$("msg").innerHTML=`<span style="color:var(--ok)">✓ ${esc(r.name)} geladen (${r.size[0]} × ${r.size[1]} mm)</span>`+(r.notes.length?"<br>"+r.notes.map(esc).join("<br>"):"");
-    if(upKind==="logo")$("logo_on").checked=true;if(upKind==="plate"){$("plate_src").value="file";toggleSrc()}}
+    if(upKind==="logo"||upKind==="lib")$("logo_on").checked=true;if(upKind==="plate"){$("plate_src").value="file";toggleSrc()}}
   else $("msg").innerHTML=`<span style="color:var(--acc)">Fehler: ${esc(r.error)}</span>`;
   await info();schedule();
 };

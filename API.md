@@ -98,6 +98,7 @@ Ein Wert außerhalb der Grenzen, ein falscher Typ oder ein unbekanntes Feld (Tip
 | POST | `/api/v1/jobs/<id>/cancel` | Auftrag abbrechen (gleichwertig: `DELETE /api/v1/jobs/<id>`) |
 | GET | `/api/v1/jobs/<id>/gcode` | G-Code als reiner Text |
 | GET · PUT · DELETE | `/api/v1/assets/logo` · `/api/v1/assets/plate` | Logo bzw. Werkstück-Kontur dauerhaft speichern |
+| GET | `/api/v1/logos` | Standard-Logos aus dem Ordner `logos/` mit Größe |
 
 ---
 
@@ -420,13 +421,15 @@ Werkstück-Nullpunkt beziehen, verschieben sie sich mit ihm. Bei einem stark and
 
 ## Logo und Kontur als JSON
 
-Logo und Werkstück-Kontur haben überall dieselbe Form. Genau **eines** der Felder `svg`, `dxf`, `base64`, `strokes` angeben:
+Logo und Werkstück-Kontur haben überall dieselbe Form. Genau **eines** der Felder `svg`, `dxf`, `base64`, `strokes`
+(oder beim Logo `library`) angeben:
 
 ```json
 {"svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" …>…</svg>"}
 {"dxf": "0\nSECTION\n…"}
 {"name": "logo.dwg", "base64": "QUMxMDMy…"}
 {"strokes": [[[0, 0], [80, 0], [80, 40], [0, 40], [0, 0]]]}
+{"library": "firma.svg"}
 ```
 
 | Feld | Bedeutung |
@@ -435,6 +438,7 @@ Logo und Werkstück-Kontur haben überall dieselbe Form. Genau **eines** der Fel
 | `dxf` | DXF-Datei als Text |
 | `base64` | Beliebige Datei (SVG, DXF, DWG) Base64-kodiert. Dann ist `name` mit Dateiendung Pflicht. |
 | `strokes` | Fertige Linien in mm |
+| `library` | Nur Logo: Dateiname eines Standard-Logos aus dem Ordner `logos/` (Liste: `GET /api/v1/logos`) |
 | `name` | Anzeigename, optional |
 
 - Die linke untere Ecke der Zeichnung wird auf 0/0 verschoben.
@@ -458,6 +462,16 @@ Zwei Wege:
 | PUT | `/api/v1/assets/logo` · `/api/v1/assets/plate` | Objekt wie oben | `{"ok": true, "asset": {"name": …, "notes": […], "size": [b, h]}}` |
 | GET | dieselben Pfade | – | `{"ok": true, "asset": {…}}` oder `"asset": null`. Mit `?include=geometry` samt `strokes`. |
 | DELETE | dieselben Pfade | – | `{"ok": true, "asset": null}` |
+
+**3. Standard-Logo verwenden:** Alle SVG/DXF/DWG-Dateien im Ordner `logos/` des Programms sind immer verfügbar.
+
+```json
+{"text": "Max Muster", "logo": {"library": "firma.svg"}}
+```
+
+`GET /api/v1/logos` liefert die Liste:
+`{"ok": true, "folder": "…\logos", "logos": [{"name": "firma.svg", "size": [36.0, 10.0], "notes": []}]}`.
+Mit `PUT /api/v1/assets/logo` und `{"library": "firma.svg"}` wird ein Standard-Logo zum gespeicherten Logo.
 
 `notes` enthält Hinweise vom Import, z. B. ausgelassene Texte oder ignorierte offene Linien.
 Eine gespeicherte Kontur wird nur benutzt, wenn der Auftrag `"plate_src": "file"` setzt.

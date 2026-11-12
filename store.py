@@ -1,5 +1,6 @@
 """
 Gespeicherte Dateien im Ordner data/: Logo, Werkstück-Kontur, eigene Vorlagen.
+Standard-Logos (immer verfügbar, im Git) liegen im Ordner logos/.
 Dazu das Einlesen von Logo/Kontur aus einer Datei oder direkt aus JSON.
 """
 import base64
@@ -12,6 +13,8 @@ import engraving as E
 import importer
 
 DATA = E.BASE / "data"
+LOGO_DIR = E.BASE / "logos"   # Standard-Logos: einfach SVG/DXF/DWG-Dateien hineinlegen
+LOGO_EXT = (".svg", ".dxf", ".dwg")
 ASSETS = ("logo", "plate")
 DEFAULT_PRESETS = [{"name": "Platte 70 × 50 mm", "w": 70, "h": 50, "r": 3, "builtin": True}]
 MAX_POINTS = 500_000
@@ -37,6 +40,44 @@ def save_json(name, obj):
 
 def presets():
     return DEFAULT_PRESETS + load_json("presets.json", [])
+
+
+# ---------------------------------------------------------------- Standard-Logos (Ordner logos/)
+
+_lib_cache = {}  # Dateiname -> (Änderungszeit, Asset)
+
+
+def library():
+    """Dateinamen aller Standard-Logos, alphabetisch."""
+    if not LOGO_DIR.is_dir():
+        return []
+    return sorted((f.name for f in LOGO_DIR.iterdir()
+                   if f.is_file() and f.suffix.lower() in LOGO_EXT and not f.name.startswith(".")),
+                  key=str.lower)
+
+
+def library_logo(name):
+    """Ein Standard-Logo laden. Nur Dateien, die wirklich im Ordner logos/ liegen (kein Pfad)."""
+    if not isinstance(name, str) or name not in library():
+        raise BadAsset(f"Standard-Logo „{name}“ gibt es nicht. Vorhanden: " + (", ".join(library()) or "keine"))
+    f = LOGO_DIR / name
+    mtime = f.stat().st_mtime
+    hit = _lib_cache.get(name)
+    if not hit or hit[0] != mtime:
+        hit = (mtime, asset_from_file("logo", name, f.read_bytes()))
+        _lib_cache[name] = hit
+    return hit[1]
+
+
+def library_info():
+    out = []
+    for name in library():
+        try:
+            a = library_logo(name)
+            out.append({"name": name, "size": a["size"], "notes": a["notes"]})
+        except BadAsset as e:
+            out.append({"name": name, "error": str(e)})
+    return out
 
 
 # ---------------------------------------------------------------- Logo / Kontur
@@ -116,13 +157,15 @@ def asset_from_json(kind, obj):
     {"dxf": "0\\nSECTION…"}                    DXF als Text
     {"name": "logo.dwg", "base64": "…"}       beliebige Datei (SVG/DXF/DWG), Base64-kodiert
     {"strokes": [[[x, y], [x, y], …], …]}     fertige Linien in mm
+    {"library": "firma.svg"}                  Standard-Logo aus dem Ordner logos/ (nur Logo)
     "name" ist überall erlaubt und nur bei base64 Pflicht (wegen der Dateiendung)."""
     if not isinstance(obj, dict):
         raise BadAsset("Objekt erwartet, z. B. {\"svg\": \"<svg …>\"} oder {\"strokes\": […]}.")
-    given = [k for k in ("svg", "dxf", "base64", "strokes") if obj.get(k) is not None]
+    forms = ("svg", "dxf", "base64", "strokes", "library")
+    given = [k for k in forms if obj.get(k) is not None]
     if len(given) != 1:
-        raise BadAsset("Genau eines der Felder svg, dxf, base64 oder strokes angeben.")
-    unknown = [k for k in obj if k not in ("svg", "dxf", "base64", "strokes", "name")]
+        raise BadAsset("Genau eines der Felder svg, dxf, base64, strokes oder library angeben.")
+    unknown = [k for k in obj if k not in forms + ("name",)]
     if unknown:
         raise BadAsset("Unbekanntes Feld: " + ", ".join(map(str, unknown)))
     form, value = given[0], obj[given[0]]
@@ -131,6 +174,10 @@ def asset_from_json(kind, obj):
         raise BadAsset("name muss ein Text sein.")
     name = os.path.basename(name or "")[:120]
 
+    if form == "library":
+        if kind != "logo":
+            raise BadAsset("library gibt es nur für Logos (Ordner logos/).")
+        return library_logo(value)
     if form == "strokes":
         return _finish(kind, name or "strokes", _strokes_from_json(value), [])
     if not isinstance(value, str) or not value.strip():

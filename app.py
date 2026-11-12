@@ -224,6 +224,7 @@ def v1_index():
         "POST /api/v1/jobs/<id>/cancel": "Auftrag abbrechen",
         "GET /api/v1/jobs/<id>/gcode": "G-Code als Text",
         "GET|PUT|DELETE /api/v1/assets/<logo|plate>": "Logo bzw. Werkstück-Kontur dauerhaft speichern",
+        "GET /api/v1/logos": "Standard-Logos aus dem Ordner logos/ (im Auftrag: \"logo\": {\"library\": \"name.svg\"})",
     })
 
 
@@ -315,6 +316,11 @@ def v1_cancel_job(job_id):
     return jsonify(ok=True, removed_from_queue=removed, job=job_view(job))
 
 
+@app.get("/api/v1/logos")
+def v1_logos():
+    return jsonify(ok=True, folder=str(store.LOGO_DIR), logos=store.library_info())
+
+
 @app.get("/api/v1/assets/<kind>")
 def v1_get_asset(kind):
     if kind not in store.ASSETS:
@@ -361,7 +367,46 @@ def info():
         assets[kind] = {"name": a["name"], "notes": a.get("notes", [])} if a else None
     return jsonify(fonts=E.FONTS, font_list=[[k, v] for k, v in E.FONTS.items()],
                    default_font=E.font_key(E.DEFAULT_FONT), printers=machine.list_printers(),
-                   windows=machine.can_send(), presets=store.presets(), assets=assets)
+                   windows=machine.can_send(), presets=store.presets(), assets=assets,
+                   library=store.library())
+
+
+@app.get("/api/logos")
+def logos():
+    return jsonify(ok=True, logos=store.library())
+
+
+@app.post("/api/logos/use")
+def use_logo():
+    """Standard-Logo als aktuelles Logo übernehmen."""
+    try:
+        asset = store.library_logo((request.json or {}).get("name"))
+    except store.BadAsset as e:
+        return jsonify(ok=False, error=str(e)), 400
+    store.save_asset("logo", asset)
+    return jsonify(ok=True, name=asset["name"], size=asset["size"], notes=asset["notes"])
+
+
+@app.post("/api/logos")
+def add_logo():
+    """Datei als Standard-Logo in den Ordner logos/ legen (vorher prüfen, ob sie lesbar ist)."""
+    f = request.files.get("file")
+    if not f or not f.filename:
+        return jsonify(ok=False, error="Keine Datei."), 400
+    name = re.sub(r"[^\w.\- ]", "_", os.path.basename(f.filename)).strip(" .")[:100]
+    if not name.lower().endswith(store.LOGO_EXT):
+        return jsonify(ok=False, error="Nur SVG, DXF oder DWG."), 400
+    data = f.read()
+    try:
+        asset = store.asset_from_file("logo", name, data)
+    except store.BadAsset as e:
+        return jsonify(ok=False, error=str(e)), 400
+    if (store.LOGO_DIR / name).exists() and request.args.get("overwrite") != "1":
+        return jsonify(ok=False, exists=True, error=f"„{name}“ gibt es schon in den Standard-Logos."), 409
+    store.LOGO_DIR.mkdir(exist_ok=True)
+    (store.LOGO_DIR / name).write_bytes(data)
+    store.save_asset("logo", asset)
+    return jsonify(ok=True, name=name, size=asset["size"], notes=asset["notes"], logos=store.library())
 
 
 @app.post("/api/preview")

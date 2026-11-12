@@ -41,6 +41,10 @@ Standard: Platte **70 × 50 mm** quer, mit runden Ecken.
 - Graviert werden die Umrisslinien. „Flächen mit Linien füllen“ schraffiert geschlossene
   Flächen (dauert deutlich länger).
 - Logo, Kontur und eigene Vorlagen liegen im Ordner `data/` und bleiben beim Neustart erhalten.
+- **Standard-Logos**: Alle Dateien im Ordner `logos/` stehen unter „Standard-Logo“ zur Auswahl.
+  Einfach hineinkopieren oder „Datei zu den Standard-Logos hinzufügen…“ benutzen.
+  Der Ordner gehört zum Git-Repository, die Logos sind also nach einem Commit überall verfügbar.
+- **Plattenvorlagen**: eingebaut in `store.py` (`DEFAULT_PRESETS`), eigene in `data/presets.json`.
 
 ## Pro Gravur
 1. Werkstück einspannen. In VPanel oben als Koordinatensystem **G54** wählen
