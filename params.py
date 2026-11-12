@@ -44,6 +44,13 @@ PARAMS = [
     _n("plate_w", 70, 5, 1000, group="plate", doc="Breite (X)"),
     _n("plate_h", 50, 5, 1000, group="plate", doc="Höhe (Y)"),
     _n("plate_r", 3, 0, 500, group="plate", doc="Eckradius"),
+    # --- Spannbereiche (Sperrzonen links und rechts)
+    _b("clamp_on", True, group="clamp",
+       doc="Spannbereiche links und rechts sperren: Kreis, der ins Werkstück ragt; wird nie durchfahren"),
+    _n("clamp_d", E.CLAMP_D, 1, 200, group="clamp", doc="Durchmesser des Spannkreises"),
+    _n("clamp_in", E.CLAMP_IN, 0, 100, group="clamp", doc="So weit ragt der Kreis ins Werkstück"),
+    _n("clamp_y", None, -1000, 1000, group="clamp", doc="Y der Kreismitte (Standard: halbe Werkstückhöhe)"),
+    _n("clamp_margin", 0, 0, 20, group="clamp", doc="Zusätzlicher Sicherheitsabstand um den Kreis"),
     # --- Text
     Param("text", "string", "", hi=E.MAX_CHARS, group="text", doc="Gravurtext, Zeilenumbruch mit \\n"),
     _c("font", E.font_key(E.DEFAULT_FONT), E.FONTS, group="text", doc="Schrift"),

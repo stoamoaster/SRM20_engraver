@@ -69,6 +69,7 @@ Fehler: `"ok": false` und ein `error`-Objekt. `code` ist stabil und für Program
 | 401 | `unauthorized` | API-Schlüssel fehlt oder ist falsch |
 | 404 | `not_found`, `job_not_found` | Endpunkt oder Auftrag gibt es nicht |
 | 409 | `blocked_by_warning` | Gravur liegt außerhalb des Werkstücks oder Werkstück zu groß. Mit `"force": true` trotzdem starten. |
+| 409 | `clamp_collision` | Der G-Code fährt in einen Spannbereich. Lässt sich **nicht** mit `force` übergehen; Details in `violations`. |
 | 409 | `machine_busy` | Ein anderer Auftrag läuft noch. Mit `"queue": true` dahinter einreihen. |
 | 409 | `already_started`, `already_finished` | Auftrag wurde schon gestartet bzw. ist schon abgeschlossen |
 | 422 | `invalid_parameters` | Feld falsch, außerhalb der Grenzen oder unbekannt. Alle Fehler stehen in `details`. |
@@ -173,6 +174,8 @@ Antwort **201** mit dem Auftrag:
 | `warnings` | Hinweise mit stabilem `code` und deutschem Text, siehe [Warnungen](#warnungen) |
 | `can_start` | `true` = der Auftrag ist berechnet und kann gestartet werden |
 | `needs_force` | `true` = Start nur mit `"force": true` |
+| `gcode_check` | Kontrolle des fertigen G-Codes gegen die Spannbereiche: `{"ok", "moves", "count", "violations": [{"line", "code", "kind"}], "start"}`. `ok: false` sperrt den Start. |
+| `clamps` | Spannbereiche als `[cx, cy, Radius, Radius mit Sicherheitsabstand]` (leer = abgeschaltet) |
 | `plate_size` | `[Breite, Höhe]` des Werkstücks |
 | `text_height` | Tatsächliche Schrifthöhe nach der automatischen Verkleinerung (`null` ohne Text) |
 | `text_bbox` | Rahmen um den Text `[x0, y0, x1, y1]` (`null` ohne Text) |
@@ -191,6 +194,8 @@ berechnet. Er steht dann in `error.job` und lässt sich später mit `/start` sta
 |---|---|---|
 | `outside` | Teile der Gravur liegen außerhalb des Werkstücks | **ja** (außer bei `mode: "outline"`) |
 | `plate_too_large` | Werkstück größer als der Arbeitsbereich (203,2 × 152,4 mm) | **ja** |
+| `clamp_collision` | Der G-Code fährt in einen Spannbereich (Gravur liegt darin oder Leerfahrt nicht umfahrbar) | **immer**, auch mit `force` |
+| `outline_clipped` | `mode: "outline"`: Umriss wird in den Spannbereichen ausgelassen | nein |
 | `near_edge` | Gravur näher als 0,5 mm am Rand | nein |
 | `text_shrunk` | Schrifthöhe wurde automatisch verkleinert | nein |
 | `missing_chars` | Zeichen fehlen in der Schrift und werden ausgelassen | nein |
@@ -317,6 +322,21 @@ richtet sich nach einem anderen Feld (`logo_depth`, `fill_step`).
 | `plate_w` | Zahl | 70 | 5–1000 | Breite (X) |
 | `plate_h` | Zahl | 50 | 5–1000 | Höhe (Y) |
 | `plate_r` | Zahl | 3 | 0–500 | Eckradius |
+
+### Spannbereiche
+
+Links und rechts vom Werkstück liegt je ein Kreis (Spannvorrichtung), der ins Werkstück ragt.
+Die Fräse fährt in X/Y nie hinein, auch nicht bei Leerfahrten: Diese werden über dem Werkstück
+um den Kreis herumgeführt. Der fertige G-Code wird danach Zeile für Zeile kontrolliert (`gcode_check`).
+Für die erste Anfahrt wird angenommen, dass die Fräse in der VIEW-/Parkposition (`park_x`/`park_y`) steht.
+
+| Feld | Typ | Standard | Bereich | Bedeutung |
+|---|---|---|---|---|
+| `clamp_on` | bool | `true` | | Spannbereiche sperren |
+| `clamp_d` | Zahl | 30 | 1–200 | Durchmesser des Kreises |
+| `clamp_in` | Zahl | 7 | 0–100 | So weit ragt der Kreis ins Werkstück |
+| `clamp_y` | Zahl | halbe Höhe | −1000–1000 | Y der Kreismitte |
+| `clamp_margin` | Zahl | 0 | 0–20 | Zusätzlicher Sicherheitsabstand um den Kreis |
 
 ### Text
 

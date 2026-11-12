@@ -28,6 +28,10 @@ Standard: Platte **70 × 50 mm** quer, mit runden Ecken.
 - Oder **Form → Kontur aus Datei**: einen geschlossenen Umriss als DXF/DWG/SVG laden
   (z. B. eine Platte mit besonderer Form). Die linke untere Ecke des Umrisses wird zum Nullpunkt.
 - Die Vorschau warnt, wenn Text oder Logo zu nah am Rand oder außerhalb liegen.
+- **Spannbereiche** (rot in der Vorschau): links und rechts je ein Kreis (Standard Ø 30 mm, ragt 7 mm
+  ins Werkstück, auf halber Höhe). Die Fräse fährt dort nie durch; Leerfahrten werden über dem
+  Werkstück darum herumgeführt. Der fertige G-Code wird zusätzlich kontrolliert. Liegt etwas im
+  roten Bereich, wird nicht gesendet. Angenommen wird, dass die Fräse beim Start in der VIEW-Position steht.
 
 ## Logo-Dateien
 - **SVG** (z. B. aus Inkscape/Illustrator) oder **DXF** (aus jedem CAD-Programm).

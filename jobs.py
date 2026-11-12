@@ -106,6 +106,10 @@ def start(job, printer=None, force=False, queue=False):
         r = job.result
         if not r["startable"]:
             raise JobError(422, "nothing_to_engrave", "Nichts zu gravieren – kein Text und kein Logo.")
+        if not r["check"]["ok"]:  # G-Code fährt in einen Spannbereich: nie senden, auch nicht mit force
+            texts = [w["message"] for w in r["warnings"] if w["code"] == "clamp_collision"]
+            raise JobError(409, "clamp_collision", " ".join(texts) or "G-Code verletzt einen Spannbereich.",
+                           violations=r["check"]["violations"])
         if r["blocking"] and not force:
             texts = [w["message"] for w in r["warnings"] if w["code"] in r["blocking"]]
             raise JobError(409, "blocked_by_warning",

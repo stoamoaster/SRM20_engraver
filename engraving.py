@@ -6,6 +6,7 @@ Einstieg ist build(params, logo, contour): params kommt fertig geprüft aus para
 Nullpunkt: X/Y = linke untere Ecke des Werkstücks, Z = Oberseite des Werkstücks.
 """
 import math
+import re
 from pathlib import Path
 
 from HersheyFonts import HersheyFonts
@@ -442,16 +443,167 @@ def optimize_order(strokes, start=(0.0, 0.0)):
     return out
 
 
+# ---------------------------------------------------------------- Spannbereiche (Sperrzonen)
+#
+# Eine Sperrzone ist ein Kreis (cx, cy, R) in Werkstück-Koordinaten. Der Fräser-Mittelpunkt darf
+# in X/Y nie hinein – weder beim Fräsen noch bei Leerfahrten, unabhängig von der Z-Höhe.
+
+CLAMP_D, CLAMP_IN = 30.0, 7.0  # Kreisdurchmesser und wie weit er ins Werkstück ragt (mm)
+ROUTE_CLEAR = 0.5              # so viel Luft lassen Umfahrungen zur Sperrzone (mm)
+CHECK_TOL = 0.002              # Rundung im G-Code (3 Nachkommastellen)
+
+
+def clamp_zones(p, pw, ph):
+    """Sperrzonen links und rechts vom Werkstück -> Liste von (cx, cy, R). R enthält den Sicherheitsabstand."""
+    if not p["clamp_on"]:
+        return []
+    r = p["clamp_d"] / 2
+    cy = ph / 2 if p["clamp_y"] is None else p["clamp_y"]
+    off = r - p["clamp_in"]  # Abstand Kreismitte – Werkstückkante (außerhalb)
+    R = r + p["clamp_margin"]
+    return [(-off, cy, R), (pw + off, cy, R)]
+
+
+def _free(a, b, zones):
+    return all(_seg_dist((cx, cy), a, b) >= R - 1e-9 for cx, cy, R in zones)
+
+
+def route(a, b, zones, bounds=None, n=16):
+    """Leerfahrt von a nach b als Liste von Zielpunkten (ohne a). Führt die direkte Linie durch eine
+    Sperrzone, wird sie auf dem kürzesten Weg umfahren. Umfahren wird nur innerhalb von
+    bounds = (x0, y0, x1, y1), also über dem Werkstück – nie außen um die Spannvorrichtung herum.
+    Gibt es keinen freien Weg (z. B. Ziel in der Zone), bleibt die direkte Linie; das meldet check_gcode."""
+    if not zones or _free(a, b, zones):
+        return [b]
+    nodes = [a, b]
+    for cx, cy, R in zones:
+        rv = (R + ROUTE_CLEAR) / math.cos(math.pi / n)  # Vieleck UM den Kreis: Kanten bleiben draußen
+        for i in range(n):
+            w = 2 * math.pi * i / n
+            pt = (cx + rv * math.cos(w), cy + rv * math.sin(w))
+            if bounds is None or (bounds[0] <= pt[0] <= bounds[2] and bounds[1] <= pt[1] <= bounds[3]):
+                nodes.append(pt)
+    # kürzester Weg (Dijkstra) über alle Punkte, die sich gegenseitig frei "sehen"
+    dist, prev, todo = {0: 0.0}, {}, set(range(len(nodes)))
+    while todo:
+        u = min((i for i in todo if i in dist), key=dist.get, default=None)
+        if u is None or u == 1:
+            break
+        todo.remove(u)
+        for v in todo:
+            d = dist[u] + math.dist(nodes[u], nodes[v])
+            if d < dist.get(v, math.inf) and _free(nodes[u], nodes[v], zones):
+                dist[v], prev[v] = d, u
+    if 1 not in prev:
+        return [b]
+    path, i = [], 1
+    while i != 0:
+        path.append(nodes[i])
+        i = prev[i]
+    return path[::-1]
+
+
+def clip_outside(strokes, zones, extra=0.05):
+    """Schneidet aus Linien die Teile heraus, die in einer Sperrzone liegen."""
+    if not zones:
+        return strokes
+    zones = [(cx, cy, R + extra) for cx, cy, R in zones]
+    out = []
+    for s in strokes:
+        cur = []
+        for (ax, ay), (bx, by) in zip(s, s[1:]):
+            dx, dy = bx - ax, by - ay
+            L = dx * dx + dy * dy
+            if L == 0:
+                continue
+            ts = {0.0, 1.0}
+            for cx, cy, R in zones:  # Schnittpunkte Strecke – Kreis
+                fx, fy = ax - cx, ay - cy
+                h = (fx * dx + fy * dy) / L
+                disc = h * h - (fx * fx + fy * fy - R * R) / L
+                if disc > 0:
+                    ts.update(t for t in (-h - math.sqrt(disc), -h + math.sqrt(disc)) if 0 < t < 1)
+            ts = sorted(ts)
+            for t0, t1 in zip(ts, ts[1:]):
+                tm = (t0 + t1) / 2
+                mid = (ax + dx * tm, ay + dy * tm)
+                if t1 - t0 < 1e-9 or any(math.dist(mid, (cx, cy)) < R for cx, cy, R in zones):
+                    if len(cur) > 1:
+                        out.append(cur)
+                    cur = []
+                    continue
+                p0, p1 = (ax + dx * t0, ay + dy * t0), (ax + dx * t1, ay + dy * t1)
+                if cur and math.dist(cur[-1], p0) < 1e-9:
+                    cur.append(p1)
+                else:
+                    if len(cur) > 1:
+                        out.append(cur)
+                    cur = [p0, p1]
+        if len(cur) > 1:
+            out.append(cur)
+    return out
+
+
+_WORD = re.compile(r"([A-Z])\s*([-+]?\d*\.?\d+)")
+_KINDS = {"cut": "Fräsbahn", "travel": "Leerfahrt", "plunge": "Zustellung in Z"}
+
+
+def check_gcode(gcode, zones, start=None):
+    """Unabhängige Kontrolle des fertigen NC-Programms: liest den Text Zeile für Zeile, verfolgt die
+    Position und prüft JEDE Bewegung (G00 und G01, auch reine Z-Bewegungen) gegen die Sperrzonen.
+
+    start: X/Y-Position der Fräse vor der ersten Zeile (None = unbekannt, dann wird die erste Anfahrt
+    nur am Zielpunkt geprüft). Liefert {"ok", "moves", "count", "violations": [{line, code, kind}, …]}."""
+    x, y = start if start else (None, None)
+    mode, moves, bad = 0, 0, []
+
+    def hit(line_no, code, kind):
+        bad.append({"line": line_no, "code": code, "kind": kind})
+
+    for no, raw in enumerate(gcode.splitlines(), 1):
+        line = re.sub(r"\(.*?\)|;.*", "", raw).strip().upper()
+        if not line or line == "%":
+            continue
+        nx, ny, has_xy, has_z = x, y, False, False
+        for letter, val in _WORD.findall(line):
+            v = float(val)
+            if letter == "G":
+                if v in (0, 1):
+                    mode = int(v)
+                elif v in (2, 3, 91) and zones:  # Bögen / Kettenmaß erzeugt dieses Programm nie
+                    hit(no, raw.strip(), "unknown")
+            elif letter == "X":
+                nx, has_xy = v, True
+            elif letter == "Y":
+                ny, has_xy = v, True
+            elif letter == "Z":
+                has_z = True
+        if not (has_xy or has_z):
+            continue
+        moves += 1
+        if nx is not None and ny is not None:
+            a = (nx, ny) if x is None or y is None else (x, y)
+            if any(_seg_dist((cx, cy), a, (nx, ny)) < R - CHECK_TOL for cx, cy, R in zones):
+                hit(no, raw.strip(), "plunge" if not has_xy else ("cut" if mode == 1 else "travel"))
+        x, y = nx, ny
+    return {"ok": not bad, "moves": moves, "count": len(bad), "violations": bad[:20],
+            "start": list(start) if start else None}
+
+
 # ---------------------------------------------------------------- G-Code
 
-WCS = ("G54", "G55", "G56", "G57", "G58", "G59")
+WCS =("G54", "G55", "G56", "G57", "G58", "G59")
 # VIEW-/Parkposition in WERKSTÜCKkoordinaten (gewähltes System, z. B. G54),
 # an der SRM-20 gemessen: dort steht die Fräse nach Drücken der VIEW-Taste
 PARK_X, PARK_Y, PARK_Z = 33.7, 121.8, 57.5
 
 
-def make_gcode(jobs, safe_z, feed, plunge, rpm, passes, wcs="G54", park=None):
+def make_gcode(jobs, safe_z, feed, plunge, rpm, passes, wcs="G54", park=None,
+               zones=(), start=(0.0, 0.0), bounds=None):
     """jobs: Liste von (strokes, tiefe). Tiefe < 0 = über der Oberfläche (Luftschnitt).
+
+    zones: Sperrzonen (cx, cy, R) – Leerfahrten werden darum herumgeführt (siehe route).
+    start: X/Y-Position der Fräse beim Programmstart, bounds: Bereich, in dem umfahren werden darf.
 
     park: None = am Ende zum Werkstück-Nullpunkt (X0 Y0) fahren.
     (x, y, z) = Parkposition im Werkstück-Koordinatensystem: erst Z hoch, dann X/Y.
@@ -472,8 +624,17 @@ def make_gcode(jobs, safe_z, feed, plunge, rpm, passes, wcs="G54", park=None):
     # (konventionelle Interpretation, Einheit 0,001 mm/min) -> Fräse fährt mit Minimalspeed
     f_feed, f_plunge = f"F{feed:.1f}", f"F{plunge:.1f}"
     cut_len = travel = 0.0
-    pos = (0.0, 0.0)
+    pos = tuple(start)
     plunges = 0
+
+    def rapid(target):
+        """Leerfahrt in X/Y zum Ziel, wenn nötig mit Zwischenpunkten um die Sperrzonen."""
+        nonlocal travel, pos
+        for wx, wy in route(pos, target, zones, bounds):
+            g.append(f"G00 X{wx:.3f} Y{wy:.3f}")
+            travel += math.dist(pos, (wx, wy))
+            pos = (wx, wy)
+
     for strokes, depth in jobs:
         if not strokes:
             continue
@@ -487,9 +648,8 @@ def make_gcode(jobs, safe_z, feed, plunge, rpm, passes, wcs="G54", park=None):
                 if not (down and math.dist(pos, (x, y)) < 0.01):
                     if down:
                         g.append(f"G00 Z{safe_z:.3f}")
-                    g.append(f"G00 X{x:.3f} Y{y:.3f}")
+                    rapid((x, y))
                     g.append(f"G01 Z{z:.3f} {f_plunge}")
-                    travel += math.dist(pos, (x, y))
                     plunges += 1
                     down = True
                 for i, ((ax, ay), (bx, by)) in enumerate(zip(s, s[1:])):
@@ -498,12 +658,12 @@ def make_gcode(jobs, safe_z, feed, plunge, rpm, passes, wcs="G54", park=None):
                 pos = s[-1]
             g.append(f"G00 Z{safe_z:.3f}")
     if park:
-        g += ["M05",
-              f"G00 Z{max(park[2], safe_z):.3f}",       # zuerst nur Z nach oben
-              f"G00 X{park[0]:.3f} Y{park[1]:.3f}",      # dann X/Y in die VIEW-/Parkposition
-              "%"]
+        g += ["M05", f"G00 Z{max(park[2], safe_z):.3f}"]  # zuerst nur Z nach oben
+        rapid((park[0], park[1]))                         # dann X/Y in die VIEW-/Parkposition
     else:
-        g += ["M05", "G00 X0.000 Y0.000", "%"]
+        g.append("M05")
+        rapid((0.0, 0.0))
+    g.append("%")
     # grobe Zeitschätzung (Eilgang ~ 1800 mm/min)
     minutes = cut_len / feed + travel / 1800 + plunges * (2 * safe_z + 0.5) / plunge
     return "\n".join(g) + "\n", minutes
@@ -610,22 +770,48 @@ def build(p, logo=None, contour=None):
         elif worst < EDGE_MIN:
             warn("near_edge", f"Gravur liegt nur {worst:.2f} mm vom Werkstückrand entfernt.")
 
+    # --- Spannbereiche: dort darf die Fräse nicht hin, Leerfahrten werden darum herumgeführt.
+    # Annahme für die Anfahrt: Die Fräse steht beim Start in der VIEW-/Parkposition.
+    zones = clamp_zones(p, pw, ph)
+    start = (p["park_x"], p["park_y"]) if zones else (0.0, 0.0)
+    safe = dict(zones=zones, start=start, bounds=(0.0, 0.0, pw, ph))
+
     # --- G-Code
     cut = (p["feed"], p["plunge"], p["rpm"])
     text_o = optimize_order(text_s)
     logo_o = optimize_order(logo_s, text_o[-1][-1] if text_o else (0.0, 0.0))
     if mode == "air":  # Luftschnitt: Fräser fährt 1 mm ÜBER der Oberfläche
-        gcode, minutes = make_gcode([(text_o, -1.0), (logo_o, -1.0)], max(safe_z, 3), *cut, 1, p["wcs"], park)
+        gcode, minutes = make_gcode([(text_o, -1.0), (logo_o, -1.0)], max(safe_z, 3), *cut, 1, p["wcs"], park,
+                                    **safe)
     elif mode == "outline":  # nur Werkstückumriss 1 mm über der Oberfläche abfahren
-        gcode, minutes = make_gcode([(plate_strokes, -1.0)], max(safe_z, 3), *cut, 1, p["wcs"], park)
+        outline = clip_outside(plate_strokes, zones)
+        if zones and outline != plate_strokes:
+            warn("outline_clipped", "Der Umriss wird in den Spannbereichen ausgelassen und dort umfahren.")
+        gcode, minutes = make_gcode([(outline, -1.0)], max(safe_z, 3), *cut, 1, p["wcs"], park, **safe)
     else:
         gcode, minutes = make_gcode([(text_o, depth), (logo_o, p["logo_depth"])], safe_z, *cut,
-                                    p["passes"], p["wcs"], park)
+                                    p["passes"], p["wcs"], park, **safe)
+
+    # --- Kontrolle des fertigen G-Codes gegen die Spannbereiche (sperrt das Senden, auch mit force)
+    check = check_gcode(gcode, zones, start if zones else None)
+    if not check["ok"]:
+        kinds = [v["kind"] for v in check["violations"]]
+        first = check["violations"][0]
+        if "cut" in kinds or "plunge" in kinds:
+            why = "Die Gravur liegt im Spannbereich – Text/Logo verschieben oder verkleinern."
+        else:
+            why = ("Eine Leerfahrt führt durch den Spannbereich und lässt sich nicht umfahren "
+                   "(Start-/Parkposition oder Nullpunkt liegt in der Sperrzone?).")
+        warn("clamp_collision", f"SPANNBEREICH VERLETZT: {check['count']} Bewegung(en) im gesperrten Bereich, "
+                                f"zuerst G-Code-Zeile {first['line']} ({_KINDS.get(first['kind'], 'nicht prüfbar')}: "
+                                f"{first['code']}). {why} Senden ist gesperrt.")
 
     has_work = bool(text_s or logo_s)
     blocking = [w["code"] for w in warnings
                 if w["code"] in BLOCKING and not (mode == "outline" and w["code"] == "outside")]
     return dict(text=text_s, logo=logo_s, plate=plate_strokes, plate_size=(pw, ph), logo_area=logo_area,
                 text_height=real_h if tb else None, text_bbox=tb, gcode=gcode, minutes=minutes,
-                warnings=warnings, blocking=blocking, has_work=has_work,
+                warnings=warnings, blocking=blocking, has_work=has_work, check=check,
+                clamps=[[round(cx, 3), round(cy, 3), round(R - p["clamp_margin"], 3), round(R, 3)]
+                        for cx, cy, R in zones],
                 startable=mode == "outline" or has_work, mode=mode)

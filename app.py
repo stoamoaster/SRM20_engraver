@@ -169,8 +169,10 @@ def job_view(job, include=()):
         "minutes": round(r["minutes"], 2),
         "gcode_lines": r["gcode"].count("\n"),
         "warnings": r["warnings"],
-        "can_start": job.state == "prepared" and r["startable"],
+        "can_start": job.state == "prepared" and r["startable"] and r["check"]["ok"],
         "needs_force": bool(r["blocking"]),
+        "gcode_check": r["check"],
+        "clamps": r["clamps"],
         "plate_size": [round(v, 3) for v in r["plate_size"]],
         "text_height": r["text_height"] and round(r["text_height"], 3),
         "text_bbox": r["text_bbox"] and [round(v, 3) for v in r["text_bbox"]],
@@ -369,7 +371,7 @@ def preview():
     return jsonify(text=E.rnd(r["text"]), logo=E.rnd(r["logo"]), plate=E.rnd(r["plate"]),
                    plate_size=r["plate_size"], logo_area=r["logo_area"], text_height=r["text_height"],
                    text_bbox=r["text_bbox"], minutes=r["minutes"], warnings=[w["message"] for w in r["warnings"]],
-                   lines=r["gcode"].count("\n"), gcode=r["gcode"])
+                   lines=r["gcode"].count("\n"), gcode=r["gcode"], clamps=r["clamps"], check=r["check"])
 
 
 @app.post("/api/send")

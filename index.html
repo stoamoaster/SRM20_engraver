@@ -3,7 +3,7 @@
 <title>SRM-20 Gravur</title>
 <style>
 :root{--bg:#f4f3ef;--card:#fff;--ink:#1c1c1a;--mut:#6b6a64;--line:#dcdad3;--acc:#c2410c;--ok:#15803d;--warn:#b45309;
-  --plate:#e7dcc6;--plate-edge:#a8977a;--logo:#1e4fa3}
+  --plate:#e7dcc6;--plate-edge:#a8977a;--logo:#1e4fa3;--clamp:#dc2626}
 *{box-sizing:border-box}body{margin:0;font:15px/1.45 system-ui,Segoe UI,sans-serif;background:var(--bg);color:var(--ink)}
 header{padding:16px 24px;border-bottom:1px solid var(--line);display:flex;align-items:baseline;gap:14px;flex-wrap:wrap}
 header h1{font-size:19px;margin:0}header span{color:var(--mut);font-size:13px}
@@ -61,6 +61,18 @@ pre{max-height:260px;overflow:auto;background:#1c1c1a;color:#e8e6df;padding:10px
     <p class="note">Geschlossener Umriss in mm. Die linke untere Ecke des Umrisses wird zum Nullpunkt.</p>
   </div>
   <p class="note">Nullpunkt X/Y = linke untere Ecke, Z = Oberseite des Werkstücks.</p>
+  <label class="chk"><input type="checkbox" id="clamp_on" checked> Spannbereiche links und rechts sperren</label>
+  <div id="clampbox">
+    <div class="row">
+      <div><label>Kreis-Ø (mm)</label><input id="clamp_d" type="number" value="30" step="1" min="1"></div>
+      <div><label>ragt hinein (mm)</label><input id="clamp_in" type="number" value="7" step="0.5" min="0"></div>
+    </div>
+    <div class="row">
+      <div><label>Kreismitte Y</label><input id="clamp_y" type="number" step="0.5" placeholder="Mitte" title="leer = halbe Werkstückhöhe"></div>
+      <div><label>Sicherheitsabstand</label><input id="clamp_margin" type="number" value="0" step="0.5" min="0" title="zusätzlicher Abstand um den Kreis, z. B. für den Fräserradius"></div>
+    </div>
+    <p class="note">Roter Bereich = Spannvorrichtung. Die Fräse fährt dort nie durch (auch nicht bei Leerfahrten, sie werden über dem Werkstück darum herumgeführt). Der fertige G-Code wird zusätzlich kontrolliert; liegt etwas im roten Bereich, wird nicht gesendet. Annahme: Die Fräse steht beim Start in der VIEW-/Parkposition.</p>
+  </div>
 </details>
 
 <details class="card" open><summary>Text</summary>
@@ -149,8 +161,8 @@ pre{max-height:260px;overflow:auto;background:#1c1c1a;color:#e8e6df;padding:10px
 
 <section class="card" id="view" style="padding-top:16px">
   <div id="svgwrap"><svg id="svg"></svg></div>
-  <div class="legend"><span><i style="background:var(--ink)"></i>Text</span><span><i style="background:var(--logo)"></i>Logo</span><span><i style="background:var(--acc)"></i>Nullpunkt</span><span><i style="border-top:1px dashed var(--mut);height:0"></i>Platz fürs Logo</span></div>
-  <div class="stats"><div>Werkstück <b id="psize">–</b></div><div>Text <b id="tsize">–</b></div><div>Dauer ca. <b id="time">–</b></div><div>Zeilen <b id="lines">–</b></div></div>
+  <div class="legend"><span><i style="background:var(--ink)"></i>Text</span><span><i style="background:var(--logo)"></i>Logo</span><span><i style="background:var(--acc)"></i>Nullpunkt</span><span><i style="border-top:1px dashed var(--mut);height:0"></i>Platz fürs Logo</span><span><i style="background:var(--clamp);height:9px;opacity:.6"></i>Spannbereich (gesperrt)</span></div>
+  <div class="stats"><div>Werkstück <b id="psize">–</b></div><div>Text <b id="tsize">–</b></div><div>Dauer ca. <b id="time">–</b></div><div>Zeilen <b id="lines">–</b></div><div>G-Code-Kontrolle <b id="chk">–</b></div></div>
   <div id="warn"></div>
   <details><summary style="cursor:pointer;margin-top:10px">G-Code ansehen</summary><pre id="code"></pre></details>
 </section>
@@ -158,7 +170,7 @@ pre{max-height:260px;overflow:auto;background:#1c1c1a;color:#e8e6df;padding:10px
 <input type="file" id="fileinput" accept=".svg,.dxf,.dwg" hidden>
 <script>
 const $=id=>document.getElementById(id);
-const ids=["plate_src","plate_w","plate_h","plate_r","text","font","height","text_bottom","spacing_mode","tracking","width_pct","letter_spacing","margin_side","align","autoshrink","smooth",
+const ids=["plate_src","plate_w","plate_h","plate_r","clamp_on","clamp_d","clamp_in","clamp_y","clamp_margin","text","font","height","text_bottom","spacing_mode","tracking","width_pct","letter_spacing","margin_side","align","autoshrink","smooth",
   "logo_on","logo_gap","margin_top","logo_scale","logo_dx","logo_dy","logo_fill","fill_step","logo_depth",
   "depth","line_w","feed","plunge","rpm","safe_z","passes","park_x","park_y","park_z","park","wcs","mode"];
 const KEY="srm20-gravur-v2";
@@ -205,6 +217,7 @@ function matchPreset(){
   $("pdel").disabled=i<0||!!presets[i].builtin;
 }
 function toggleTracking(){$("tracking").disabled=$("spacing_mode").value!=="optical"}
+function toggleClamp(){$("clampbox").hidden=!$("clamp_on").checked}
 function toggleSrc(){const f=$("plate_src").value==="file";$("rectbox").hidden=f;$("filebox").hidden=!f}
 
 function schedule(){clearTimeout(timer);timer=setTimeout(update,200)}
@@ -217,16 +230,31 @@ async function update(){
   const tb=r.text_bbox;$("tsize").textContent=tb?`${(tb[2]-tb[0]).toFixed(1)} × ${(tb[3]-tb[1]).toFixed(1)} mm (H ${r.text_height.toFixed(1)})`:"–";
   const s=Math.round(r.minutes*60);$("time").textContent=s?(s<60?s+" s":Math.floor(s/60)+" min "+(s%60)+" s"):"–";
   $("lines").textContent=r.lines;$("code").textContent=r.gcode;
+  const c=$("chk");
+  if(!r.clamps.length){c.textContent="aus";c.style.color=""}
+  else if(r.check.ok){c.textContent=`✓ ${r.check.moves} Bewegungen frei`;c.style.color="var(--ok)"}
+  else{c.textContent=`✗ ${r.check.count} im Spannbereich`;c.style.color="var(--clamp)"}
   $("warn").innerHTML=r.warnings.map(w=>"⚠ "+esc(w)).join("<br>");
 }
 function poly(s){return s.map(p=>p[0]+","+(-p[1])).join(" ")}
 function draw(r){
   const svg=$("svg");const [pw,ph]=r.plate_size;
-  const m=Math.max(pw,ph)*0.1+4,vx=-m,vy=-ph-m,vw=pw+2*m,vh=ph+2*m;
+  const m=Math.max(pw,ph)*0.1+4;
+  let x0=-m,x1=pw+m,y0=-m,y1=ph+m; // Spannbereiche ragen seitlich über das Werkstück hinaus
+  for(const [cx,cy,,R] of r.clamps){x0=Math.min(x0,cx-R-2);x1=Math.max(x1,cx+R+2);y0=Math.min(y0,cy-R-2);y1=Math.max(y1,cy+R+2)}
+  const vx=x0,vy=-y1,vw=x1-x0,vh=y1-y0;
   svg.setAttribute("viewBox",`${vx} ${vy} ${vw} ${vh}`);
   const sw=Math.max(vw,vh)/500,fs=Math.max(vw,vh)/45,lw=Math.max(+$("line_w").value||0.3,sw);
   const d=r.plate.map(s=>"M"+s.map(p=>p[0]+" "+(-p[1])).join(" L")+"Z").join(" ");
   let o=`<path d="${d}" fill="var(--plate)" fill-rule="evenodd" stroke="var(--plate-edge)" stroke-width="${sw*1.5}"/>`;
+  // Spannbereiche: ganzer Kreis blass, der Teil auf dem Werkstück kräftig rot
+  if(r.clamps.length){
+    const circ=(R,extra)=>r.clamps.map(c=>`<circle cx="${c[0]}" cy="${-c[1]}" r="${R(c)}" ${extra}/>`).join("");
+    o+=`<clipPath id="onplate"><path d="${d}" clip-rule="evenodd"/></clipPath>`
+      +`<g fill="var(--clamp)" fill-opacity=".13" stroke="var(--clamp)" stroke-opacity=".6" stroke-width="${sw}">${circ(c=>c[2],"")}</g>`
+      +`<g clip-path="url(#onplate)" fill="var(--clamp)" fill-opacity=".5" stroke="var(--clamp)" stroke-width="${sw*1.5}">${circ(c=>c[3],"")}</g>`
+      +`<g fill="none" stroke="var(--clamp)" stroke-dasharray="${sw*4} ${sw*3}" stroke-width="${sw}">${circ(c=>c[3],"")}</g>`;
+  }
   // Maße
   o+=`<g fill="var(--mut)" font-size="${fs}" font-family="system-ui,sans-serif" text-anchor="middle">
     <text x="${pw/2}" y="${fs*1.6}">${+pw.toFixed(1)} mm</text>
@@ -243,6 +271,7 @@ function draw(r){
 ids.forEach(i=>{$(i).addEventListener("input",schedule);$(i).addEventListener("change",schedule)});
 ["plate_w","plate_h","plate_r"].forEach(i=>$(i).addEventListener("input",matchPreset));
 $("plate_src").addEventListener("change",toggleSrc);
+$("clamp_on").addEventListener("change",toggleClamp);
 $("spacing_mode").addEventListener("change",toggleTracking);
 $("preset").onchange=()=>{const p=presets[+$("preset").value];if(!p||$("preset").value==="")return matchPreset();
   $("plate_w").value=p.w;$("plate_h").value=p.h;$("plate_r").value=p.r;matchPreset();schedule()};
@@ -268,6 +297,7 @@ $("dl").onclick=()=>{if(!last)return;const a=document.createElement("a");
   a.href=URL.createObjectURL(new Blob([last.gcode],{type:"text/plain"}));a.download="gravur.nc";a.click()};
 $("send").onclick=async()=>{
   const p=params();
+  if(last&&last.check&&!last.check.ok){$("msg").innerHTML=`<span style="color:var(--clamp)">Nicht gesendet: Der G-Code fährt in einen Spannbereich (siehe Warnung unter der Vorschau).</span>`;return}
   const what={engrave:"GRAVUR",air:"LUFTSCHNITT (1 mm über der Oberfläche)",outline:"UMRISS ABFAHREN (1 mm über der Oberfläche)"}[p.mode];
   if(!confirm(`${what} starten?\n\n${p.mode==="outline"?"":`"${p.text}"\nTiefe Text: ${p.depth} mm`+($("logo_on").checked&&last&&last.logo.length?` · Logo: ${p.logo_depth} mm`:"")+"\n"}\nNullpunkt links unten + Z auf der Oberfläche gesetzt? NC-Code-Modus aktiv?`))return;
   $("send").disabled=true;$("msg").textContent="Sende…";
@@ -275,5 +305,5 @@ $("send").onclick=async()=>{
   $("msg").innerHTML=r.ok?`<span style="color:var(--ok)">✓ An Fräse gesendet.</span>`:`<span style="color:var(--acc)">Fehler: ${esc(r.error)}</span>`;
   setTimeout(()=>$("send").disabled=false,3000);
 };
-restore();toggleSrc();toggleTracking();info().then(update);
+restore();toggleSrc();toggleClamp();toggleTracking();info().then(update);
 </script></body></html>
