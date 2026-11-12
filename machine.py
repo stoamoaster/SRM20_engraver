@@ -17,13 +17,13 @@ except ImportError:
 import store
 
 SIMULATE = os.environ.get("SRM20_SIMULATE", "").strip().lower() in ("1", "true", "yes", "ja", "on")
-SIM_PRINTER = "Simulation (kein Versand)"
+SIM_PRINTER = "Simulation (nothing sent)"
 
 # Statusbits eines Windows-Druckauftrags (JOB_STATUS_*)
 _PAUSED, _ERROR, _DELETING, _SPOOLING, _PRINTING = 0x1, 0x2, 0x4, 0x8, 0x10
 _OFFLINE, _PAPEROUT, _PRINTED, _DELETED, _BLOCKED, _INTERVENTION = 0x20, 0x40, 0x80, 0x100, 0x200, 0x400
-_PROBLEMS = {_ERROR: "Fehler", _OFFLINE: "Fräse offline oder nicht verbunden", _PAPEROUT: "Gerät nicht bereit",
-             _BLOCKED: "Warteschlange blockiert", _INTERVENTION: "Eingriff am Gerät nötig"}
+_PROBLEMS = {_ERROR: "Error", _OFFLINE: "Machine offline or not connected", _PAPEROUT: "Device not ready",
+             _BLOCKED: "Queue blocked", _INTERVENTION: "User intervention required at the device"}
 
 _cache = {"t": 0.0, "names": []}
 _lock = threading.Lock()
@@ -74,7 +74,7 @@ def send(printer, gcode):
         (folder / name).write_text(gcode, encoding="ascii")
         return None
     if not win32print:
-        raise MachineError("pywin32 fehlt oder kein Windows – senden nicht möglich.")
+        raise MachineError("pywin32 missing or not on Windows – cannot send.")
     try:
         h = win32print.OpenPrinter(printer)
         try:
@@ -86,7 +86,7 @@ def send(printer, gcode):
         finally:
             win32print.ClosePrinter(h)
     except pywintypes.error as e:
-        raise MachineError(f"{e.strerror.strip()} (Windows-Fehler {e.winerror})")
+        raise MachineError(f"{e.strerror.strip()} (Windows error {e.winerror})")
     return spool_id
 
 
@@ -112,7 +112,7 @@ def spool_state(printer, spool_id):
             return "error", info.get("pStatus") or text
     if st & _PRINTING:
         return "running", None
-    return "queued", "Warteschlange angehalten" if st & _PAUSED else None
+    return "queued", "Queue paused" if st & _PAUSED else None
 
 
 def cancel(printer, spool_id):

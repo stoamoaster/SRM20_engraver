@@ -1,6 +1,6 @@
 <!doctype html>
-<html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>SRM-20 Gravur</title>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>SRM-20 Engraver</title>
 <style>
 :root{--bg:#f4f3ef;--card:#fff;--ink:#1c1c1a;--mut:#6b6a64;--line:#dcdad3;--acc:#c2410c;--ok:#15803d;--warn:#b45309;
   --plate:#e7dcc6;--plate-edge:#a8977a;--logo:#1e4fa3;--clamp:#dc2626}
@@ -38,137 +38,137 @@ pre{max-height:260px;overflow:auto;background:#1c1c1a;color:#e8e6df;padding:10px
 .legend i{display:inline-block;width:14px;height:3px;vertical-align:middle;margin-right:5px;border-radius:2px}
 @media(max-width:860px){main{grid-template-columns:minmax(0,1fr);padding:16px}#view{position:static;order:-1}#svgwrap{height:auto;min-height:0;aspect-ratio:4/3}}
 </style></head><body>
-<header><h1>SRM-20 Gravur</h1><span>Schild mit Text und Logo → G-Code → Fräse</span></header>
+<header><h1>SRM-20 Engraver</h1><span>Plate with text and logo → G-code → milling machine</span></header>
 <main>
 <div class="col">
 
-<details class="card" open><summary>Werkstück</summary>
-  <label>Form</label>
-  <select id="plate_src"><option value="rect">Platte mit runden Ecken</option><option value="file">Kontur aus Datei (DXF/DWG/SVG)</option></select>
+<details class="card" open><summary>Workpiece</summary>
+  <label>Shape</label>
+  <select id="plate_src"><option value="rect">Plate with rounded corners</option><option value="file">Contour from file (DXF/DWG/SVG)</option></select>
   <div id="rectbox">
-    <label>Vorlage</label>
+    <label>Preset</label>
     <select id="preset"></select>
     <div class="row3">
-      <div><label>Breite X</label><input id="plate_w" type="number" value="70" step="1" min="5"></div>
-      <div><label>Höhe Y</label><input id="plate_h" type="number" value="50" step="1" min="5"></div>
-      <div><label>Eckradius</label><input id="plate_r" type="number" value="3" step="0.5" min="0"></div>
+      <div><label>Width X</label><input id="plate_w" type="number" value="70" step="1" min="5"></div>
+      <div><label>Height Y</label><input id="plate_h" type="number" value="50" step="1" min="5"></div>
+      <div><label>Corner radius</label><input id="plate_r" type="number" value="3" step="0.5" min="0"></div>
     </div>
-    <div class="btns"><button class="sec" id="psave">Als Vorlage speichern</button><button class="sec" id="pdel">Vorlage löschen</button></div>
+    <div class="btns"><button class="sec" id="psave">Save as preset</button><button class="sec" id="pdel">Delete preset</button></div>
   </div>
   <div id="filebox" hidden>
-    <div class="file"><span class="name" id="plate_name">keine Kontur geladen</span>
-      <button class="sec" data-up="plate">Datei wählen…</button><button class="sec" data-rm="plate">✕</button></div>
-    <p class="note">Geschlossener Umriss in mm. Die linke untere Ecke des Umrisses wird zum Nullpunkt.</p>
+    <div class="file"><span class="name" id="plate_name">no contour loaded</span>
+      <button class="sec" data-up="plate">Choose file…</button><button class="sec" data-rm="plate">✕</button></div>
+    <p class="note">Closed outline in mm. The lower left corner of the outline becomes the origin.</p>
   </div>
-  <p class="note">Nullpunkt X/Y = linke untere Ecke, Z = Oberseite des Werkstücks.</p>
-  <label class="chk"><input type="checkbox" id="clamp_on" checked> Spannbereiche links und rechts sperren</label>
+  <p class="note">Origin X/Y = lower left corner, Z = top surface of the workpiece.</p>
+  <label class="chk"><input type="checkbox" id="clamp_on" checked> Lock clamp zones left and right</label>
   <div id="clampbox">
     <div class="row">
-      <div><label>Kreis-Ø (mm)</label><input id="clamp_d" type="number" value="30" step="1" min="1"></div>
-      <div><label>ragt hinein (mm)</label><input id="clamp_in" type="number" value="7" step="0.5" min="0"></div>
+      <div><label>Circle Ø (mm)</label><input id="clamp_d" type="number" value="30" step="1" min="1"></div>
+      <div><label>Reaches in (mm)</label><input id="clamp_in" type="number" value="7" step="0.5" min="0"></div>
     </div>
     <div class="row">
-      <div><label>Kreismitte Y</label><input id="clamp_y" type="number" step="0.5" placeholder="Mitte" title="leer = halbe Werkstückhöhe"></div>
-      <div><label>Sicherheitsabstand</label><input id="clamp_margin" type="number" value="0" step="0.5" min="0" title="zusätzlicher Abstand um den Kreis, z. B. für den Fräserradius"></div>
+      <div><label>Circle centre Y</label><input id="clamp_y" type="number" step="0.5" placeholder="centre" title="empty = half the workpiece height"></div>
+      <div><label>Safety margin</label><input id="clamp_margin" type="number" value="0" step="0.5" min="0" title="additional distance around the circle, e.g. for the cutter radius"></div>
     </div>
-    <p class="note">Roter Bereich = Spannvorrichtung. Die Fräse fährt dort nie durch (auch nicht bei Leerfahrten, sie werden über dem Werkstück darum herumgeführt). Der fertige G-Code wird zusätzlich kontrolliert; liegt etwas im roten Bereich, wird nicht gesendet. Zu Beginn fährt die Fräse immer zuerst in die VIEW-Position (erst Z hoch, dann X/Y).</p>
+    <p class="note">Red area = clamping fixture. The machine never moves through it (not even during rapid moves – they are routed around it above the workpiece). The finished G-code is checked as well; if anything lies inside the red area, nothing is sent. At the start, the machine always moves to the VIEW position first (Z up first, then X/Y).</p>
   </div>
 </details>
 
 <details class="card" open><summary>Text</summary>
-  <textarea id="text" placeholder="Text eingeben…">Hallo Welt</textarea>
-  <label>Schrift</label><select id="font"></select>
+  <textarea id="text" placeholder="Enter text…">Hello World</textarea>
+  <label>Font</label><select id="font"></select>
   <div class="row">
-    <div><label>Höhe (mm)</label><input id="height" type="number" value="10" step="0.5" min="0.5"></div>
-    <div><label>Abstand unten</label><input id="text_bottom" type="number" value="3" step="0.5" min="0"></div>
+    <div><label>Height (mm)</label><input id="height" type="number" value="10" step="0.5" min="0.5"></div>
+    <div><label>Bottom distance</label><input id="text_bottom" type="number" value="3" step="0.5" min="0"></div>
   </div>
   <div class="row">
-    <div><label>Zeichenabstände</label><select id="spacing_mode"><option value="optical" title="Abstände nach der Form der Buchstaben ausgleichen">optisch</option><option value="font" title="Abstände und Kerning der Schrift">aus Schrift</option></select></div>
-    <div><label>Laufweite %</label><input id="tracking" type="number" value="35" step="1" min="0" max="150" title="Lücke zwischen den Buchstaben in % der Schrifthöhe (nur bei „optisch“)"></div>
+    <div><label>Letter spacing</label><select id="spacing_mode"><option value="optical" title="Balance spacing according to the shape of the letters">optical</option><option value="font" title="Spacing and kerning from the font">from font</option></select></div>
+    <div><label>Tracking %</label><input id="tracking" type="number" value="35" step="1" min="0" max="150" title="Gap between letters in % of the text height (only with “optical”)"></div>
   </div>
   <div class="row">
-    <div><label>Schriftbreite %</label><input id="width_pct" type="number" value="100" step="5" min="50" max="200" title="Buchstaben waagrecht strecken (z. B. 115 für ein breiteres T)"></div>
-    <div><label>Zeichenabstand</label><input id="letter_spacing" type="number" value="0" step="0.1" min="-3" max="10" title="zusätzlicher Abstand zwischen den Buchstaben in mm"></div>
+    <div><label>Character width %</label><input id="width_pct" type="number" value="100" step="5" min="50" max="200" title="Stretch letters horizontally (e.g. 115 for a wider T)"></div>
+    <div><label>Extra spacing</label><input id="letter_spacing" type="number" value="0" step="0.1" min="-3" max="10" title="additional distance between letters in mm"></div>
   </div>
   <div class="row">
-    <div><label>Rand seitlich</label><input id="margin_side" type="number" value="3" step="0.5" min="0"></div>
-    <div><label>Zeilen ausrichten</label><select id="align"><option value="center">Mitte</option><option value="left">Links</option><option value="right">Rechts</option></select></div>
+    <div><label>Side margin</label><input id="margin_side" type="number" value="3" step="0.5" min="0"></div>
+    <div><label>Line alignment</label><select id="align"><option value="center">Centre</option><option value="left">Left</option><option value="right">Right</option></select></div>
   </div>
-  <label class="chk"><input type="checkbox" id="autoshrink" checked> zu breiten Text automatisch verkleinern</label>
-  <label class="chk"><input type="checkbox" id="smooth" checked> Rundungen glätten (nur Hershey-Schriften)</label>
-  <p class="note">Höhe = Höhe der Großbuchstaben. Der Text wird waagrecht mittig gesetzt, „Abstand unten“ gilt bis zum tiefsten Punkt (auch g, p, y).</p>
+  <label class="chk"><input type="checkbox" id="autoshrink" checked> automatically shrink text that is too wide</label>
+  <label class="chk"><input type="checkbox" id="smooth" checked> smooth curves (Hershey fonts only)</label>
+  <p class="note">Height = height of capital letters. The text is centred horizontally; “Bottom distance” is measured to the lowest point (including g, p, y).</p>
 </details>
 
 <details class="card" open><summary>Logo</summary>
-  <label class="chk" style="margin-top:4px"><input type="checkbox" id="logo_on" checked> Logo gravieren</label>
-  <label>Standard-Logo</label>
-  <select id="libsel"><option value="">– auswählen –</option></select>
-  <div class="file"><span class="name" id="logo_name">kein Logo geladen</span>
-    <button class="sec" data-up="logo">Datei wählen…</button><button class="sec" data-rm="logo">✕</button></div>
-  <button class="sec wide" data-up="lib">Datei zu den Standard-Logos hinzufügen…</button>
-  <p class="note">SVG, DXF oder DWG. Wird automatisch in den freien Platz über dem Text eingepasst.
-    Standard-Logos liegen im Ordner <b>logos/</b> im Programmordner – Dateien einfach dort hineinkopieren.</p>
+  <label class="chk" style="margin-top:4px"><input type="checkbox" id="logo_on" checked> Engrave logo</label>
+  <label>Standard logo</label>
+  <select id="libsel"><option value="">– select –</option></select>
+  <div class="file"><span class="name" id="logo_name">no logo loaded</span>
+    <button class="sec" data-up="logo">Choose file…</button><button class="sec" data-rm="logo">✕</button></div>
+  <button class="sec wide" data-up="lib">Add file to the standard logos…</button>
+  <p class="note">SVG, DXF or DWG. Automatically fitted into the free space above the text.
+    Standard logos live in the <b>logos/</b> folder of the program – simply copy files there.</p>
   <div class="row">
-    <div><label>Abstand zum Text</label><input id="logo_gap" type="number" value="3" step="0.5" min="0"></div>
-    <div><label>Rand oben</label><input id="margin_top" type="number" value="3" step="0.5" min="0"></div>
+    <div><label>Distance to text</label><input id="logo_gap" type="number" value="3" step="0.5" min="0"></div>
+    <div><label>Top margin</label><input id="margin_top" type="number" value="3" step="0.5" min="0"></div>
   </div>
   <div class="row3">
-    <div><label>Größe %</label><input id="logo_scale" type="number" value="100" step="5" min="1"></div>
-    <div><label>Versatz X</label><input id="logo_dx" type="number" value="0" step="0.5"></div>
-    <div><label>Versatz Y</label><input id="logo_dy" type="number" value="0" step="0.5"></div>
+    <div><label>Size %</label><input id="logo_scale" type="number" value="100" step="5" min="1"></div>
+    <div><label>Offset X</label><input id="logo_dx" type="number" value="0" step="0.5"></div>
+    <div><label>Offset Y</label><input id="logo_dy" type="number" value="0" step="0.5"></div>
   </div>
-  <label class="chk"><input type="checkbox" id="logo_fill"> Flächen mit Linien füllen</label>
+  <label class="chk"><input type="checkbox" id="logo_fill"> Fill areas with lines</label>
   <div class="row">
-    <div><label>Linienabstand</label><input id="fill_step" type="number" value="0.25" step="0.05" min="0.05"></div>
-    <div><label>Tiefe Logo (mm)</label><input id="logo_depth" type="number" value="0.2" step="0.05" min="0.01"></div>
+    <div><label>Line spacing</label><input id="fill_step" type="number" value="0.25" step="0.05" min="0.05"></div>
+    <div><label>Logo depth (mm)</label><input id="logo_depth" type="number" value="0.2" step="0.05" min="0.01"></div>
   </div>
 </details>
 
-<details class="card" open><summary>Fräsen</summary>
+<details class="card" open><summary>Milling</summary>
   <div class="row">
-    <div><label>Tiefe Text (mm)</label><input id="depth" type="number" value="0.2" step="0.05" min="0.01"></div>
-    <div><label>Linienbreite (mm)</label><input id="line_w" type="number" value="0.3" step="0.05" min="0.05" title="nur für die Vorschau"></div>
+    <div><label>Text depth (mm)</label><input id="depth" type="number" value="0.2" step="0.05" min="0.01"></div>
+    <div><label>Line width (mm)</label><input id="line_w" type="number" value="0.3" step="0.05" min="0.05" title="preview only"></div>
   </div>
-  <details><summary style="cursor:pointer;margin-top:12px;font-size:14px">Fräsparameter</summary>
+  <details><summary style="cursor:pointer;margin-top:12px;font-size:14px">Cutting parameters</summary>
     <div class="row">
-      <div><label>Vorschub (mm/min)</label><input id="feed" type="number" value="240"></div>
-      <div><label>Eintauchen (mm/min)</label><input id="plunge" type="number" value="60"></div>
+      <div><label>Feed rate (mm/min)</label><input id="feed" type="number" value="240"></div>
+      <div><label>Plunge rate (mm/min)</label><input id="plunge" type="number" value="60"></div>
     </div>
     <div class="row">
-      <div><label>Drehzahl (U/min)</label><input id="rpm" type="number" value="7000" max="7000"></div>
-      <div><label>Sicherheits-Z (mm)</label><input id="safe_z" type="number" value="2" step="0.5"></div>
+      <div><label>Spindle speed (rpm)</label><input id="rpm" type="number" value="7000" max="7000"></div>
+      <div><label>Safe Z (mm)</label><input id="safe_z" type="number" value="2" step="0.5"></div>
     </div>
-    <label>Durchgänge</label><input id="passes" type="number" value="1" min="1" max="10">
+    <label>Passes</label><input id="passes" type="number" value="1" min="1" max="10">
     <div class="row3">
       <div><label>Park X</label><input id="park_x" type="number" value="33.7" step="0.1"></div>
       <div><label>Park Y</label><input id="park_y" type="number" value="121.8" step="0.1"></div>
       <div><label>Park Z</label><input id="park_z" type="number" value="57.5" step="0.1" min="0"></div>
     </div>
-    <p class="note">VIEW-/Parkposition in mm im gewählten Koordinatensystem (G54 …), also bezogen auf den gesetzten Nullpunkt. Standard = VIEW-Position der SRM-20. Jedes Programm fährt <b>zu Beginn immer</b> dorthin (erst Z hoch, dann X/Y) und erst dann zum Werkstück.</p>
+    <p class="note">VIEW/park position in mm in the selected coordinate system (G54 …), i.e. relative to the set origin. Default = VIEW position of the SRM-20. Every program <b>always moves there first</b> (Z up first, then X/Y) and only then to the workpiece.</p>
   </details>
-  <label class="chk"><input type="checkbox" id="park" checked> Am Ende in VIEW-Position fahren (erst Z hoch, dann X/Y)</label>
-  <label>Koordinatensystem (wie in VPanel)</label>
+  <label class="chk"><input type="checkbox" id="park" checked> Move to VIEW position at the end (Z up first, then X/Y)</label>
+  <label>Coordinate system (as in VPanel)</label>
   <select id="wcs"><option>G54</option><option>G55</option><option>G56</option><option>G57</option><option>G58</option><option>G59</option></select>
-  <label>Modus</label>
+  <label>Mode</label>
   <select id="mode">
-    <option value="engrave">Gravieren</option>
-    <option value="air">Luftschnitt – Gravur 1 mm über der Oberfläche</option>
-    <option value="outline">Werkstück-Umriss 1 mm über der Oberfläche abfahren</option>
+    <option value="engrave">Engrave</option>
+    <option value="air">Air cut – engraving 1 mm above the surface</option>
+    <option value="outline">Trace workpiece outline 1 mm above the surface</option>
   </select>
-  <label>Fräse (Windows-Drucker)</label><select id="printer"></select>
-  <button class="go" id="send">An Fräse senden</button>
-  <button class="sec wide" id="dl">G-Code herunterladen (.nc)</button>
+  <label>Machine (Windows printer)</label><select id="printer"></select>
+  <button class="go" id="send">Send to machine</button>
+  <button class="sec wide" id="dl">Download G-code (.nc)</button>
   <div id="msg"></div>
-  <p class="hint">Vorher in VPanel: Befehlssatz <b>NC-Code</b>, oben als Koordinatensystem <b>G54</b> (bzw. das hier gewählte) auswählen, dann X/Y-Nullpunkt auf die linke untere Ecke und Z-Nullpunkt auf die Oberseite setzen. Abbrechen über VPanel oder die VIEW-Taste an der Maschine.</p>
+  <p class="hint">In VPanel beforehand: command set <b>NC code</b>, select <b>G54</b> (or the one chosen here) as coordinate system at the top, then set the X/Y origin to the lower left corner and the Z origin to the top surface. Cancel via VPanel or the VIEW button on the machine.</p>
 </details>
 </div>
 
 <section class="card" id="view" style="padding-top:16px">
   <div id="svgwrap"><svg id="svg"></svg></div>
-  <div class="legend"><span><i style="background:var(--ink)"></i>Text</span><span><i style="background:var(--logo)"></i>Logo</span><span><i style="background:var(--acc)"></i>Nullpunkt</span><span><i style="border-top:1px dashed var(--mut);height:0"></i>Platz fürs Logo</span><span><i style="background:var(--clamp);height:9px;opacity:.6"></i>Spannbereich (gesperrt)</span></div>
-  <div class="stats"><div>Werkstück <b id="psize">–</b></div><div>Text <b id="tsize">–</b></div><div>Dauer ca. <b id="time">–</b></div><div>Zeilen <b id="lines">–</b></div><div>G-Code-Kontrolle <b id="chk">–</b></div></div>
+  <div class="legend"><span><i style="background:var(--ink)"></i>Text</span><span><i style="background:var(--logo)"></i>Logo</span><span><i style="background:var(--acc)"></i>Origin</span><span><i style="border-top:1px dashed var(--mut);height:0"></i>Space for the logo</span><span><i style="background:var(--clamp);height:9px;opacity:.6"></i>Clamp zone (locked)</span></div>
+  <div class="stats"><div>Workpiece <b id="psize">–</b></div><div>Text <b id="tsize">–</b></div><div>Duration approx. <b id="time">–</b></div><div>Lines <b id="lines">–</b></div><div>G-code check <b id="chk">–</b></div></div>
   <div id="warn"></div>
-  <details><summary style="cursor:pointer;margin-top:10px">G-Code ansehen</summary><pre id="code"></pre></details>
+  <details><summary style="cursor:pointer;margin-top:10px">View G-code</summary><pre id="code"></pre></details>
 </section>
 </main>
 <input type="file" id="fileinput" accept=".svg,.dxf,.dwg" hidden>
@@ -198,25 +198,25 @@ async function info(){
   $("font").value=r.default_font;
   if(font in r.fonts)$("font").value=font;
   if(r.printers.length){$("printer").innerHTML=r.printers.map(n=>`<option>${esc(n)}</option>`).join("");$("send").disabled=false}
-  else{$("printer").innerHTML="<option value=''>keine Drucker gefunden</option>";$("send").disabled=true;
-    if(!r.windows)$("msg").textContent="Senden nur unter Windows mit pywin32 möglich – Vorschau und Download funktionieren."}
+  else{$("printer").innerHTML="<option value=''>no printers found</option>";$("send").disabled=true;
+    if(!r.windows)$("msg").textContent="Sending only works on Windows with pywin32 – preview and download work."}
   showAssets(r.assets);setPresets(r.presets);setLibrary(r.library,r.assets.logo);
 }
 function setLibrary(list,cur){
   list=list||[]; // ältere Server liefern keine Liste
-  $("libsel").innerHTML=`<option value="">${list.length?"– auswählen –":"– Ordner logos/ ist leer –"}</option>`+list.map(n=>`<option>${esc(n)}</option>`).join("");
+  $("libsel").innerHTML=`<option value="">${list.length?"– select –":"– folder logos/ is empty –"}</option>`+list.map(n=>`<option>${esc(n)}</option>`).join("");
   $("libsel").value=cur&&list.includes(cur.name)?cur.name:"";
 }
 function showAssets(a){
   for(const k of ["logo","plate"]){
     const el=$(k+"_name");
-    el.textContent=a[k]?a[k].name:(k==="logo"?"kein Logo geladen":"keine Kontur geladen");
+    el.textContent=a[k]?a[k].name:(k==="logo"?"no logo loaded":"no contour loaded");
     el.classList.toggle("has",!!a[k]);el.title=a[k]&&a[k].notes.length?a[k].notes.join("\n"):"";
   }
 }
 function setPresets(list){
   presets=list;
-  $("preset").innerHTML=`<option value="">– eigene Maße –</option>`+list.map((p,i)=>`<option value="${i}">${esc(p.name)}</option>`).join("");
+  $("preset").innerHTML=`<option value="">– custom size –</option>`+list.map((p,i)=>`<option value="${i}">${esc(p.name)}</option>`).join("");
   matchPreset();
 }
 function matchPreset(){
@@ -240,9 +240,9 @@ async function update(){
   const s=Math.round(r.minutes*60);$("time").textContent=s?(s<60?s+" s":Math.floor(s/60)+" min "+(s%60)+" s"):"–";
   $("lines").textContent=r.lines;$("code").textContent=r.gcode;
   const c=$("chk");
-  if(!r.clamps.length){c.textContent="aus";c.style.color=""}
-  else if(r.check.ok){c.textContent=`✓ ${r.check.moves} Bewegungen frei`;c.style.color="var(--ok)"}
-  else{c.textContent=`✗ ${r.check.count} im Spannbereich`;c.style.color="var(--clamp)"}
+  if(!r.clamps.length){c.textContent="off";c.style.color=""}
+  else if(r.check.ok){c.textContent=`✓ ${r.check.moves} moves clear`;c.style.color="var(--ok)"}
+  else{c.textContent=`✗ ${r.check.count} in clamp zone`;c.style.color="var(--clamp)"}
   $("warn").innerHTML=r.warnings.map(w=>"⚠ "+esc(w)).join("<br>");
 }
 function poly(s){return s.map(p=>p[0]+","+(-p[1])).join(" ")}
@@ -284,10 +284,10 @@ $("clamp_on").addEventListener("change",toggleClamp);
 $("spacing_mode").addEventListener("change",toggleTracking);
 $("preset").onchange=()=>{const p=presets[+$("preset").value];if(!p||$("preset").value==="")return matchPreset();
   $("plate_w").value=p.w;$("plate_h").value=p.h;$("plate_r").value=p.r;matchPreset();schedule()};
-$("psave").onclick=async()=>{const name=prompt("Name der Vorlage:",`Platte ${$("plate_w").value} × ${$("plate_h").value} mm`);if(!name)return;
+$("psave").onclick=async()=>{const name=prompt("Preset name:",`Plate ${$("plate_w").value} × ${$("plate_h").value} mm`);if(!name)return;
   const r=await api("/api/presets",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({name,w:$("plate_w").value,h:$("plate_h").value,r:$("plate_r").value})});
   if(r.ok)setPresets(r.presets);else alert(r.error)};
-$("pdel").onclick=async()=>{const p=presets[+$("preset").value];if(!p||p.builtin)return;if(!confirm(`Vorlage „${p.name}“ löschen?`))return;
+$("pdel").onclick=async()=>{const p=presets[+$("preset").value];if(!p||p.builtin)return;if(!confirm(`Delete preset "${p.name}"?`))return;
   const r=await api("/api/presets?name="+encodeURIComponent(p.name),{method:"DELETE"});setPresets(r.presets)};
 
 $("libsel").addEventListener("focus",async()=>{ // neu in den Ordner kopierte Dateien sofort anzeigen
@@ -297,34 +297,34 @@ $("libsel").addEventListener("focus",async()=>{ // neu in den Ordner kopierte Da
 $("libsel").onchange=async()=>{
   const name=$("libsel").value;if(!name)return;
   const r=await api("/api/logos/use",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({name})});
-  if(r.ok){$("logo_on").checked=true;$("msg").innerHTML=`<span style="color:var(--ok)">✓ Standard-Logo ${esc(r.name)} (${r.size[0]} × ${r.size[1]} mm)</span>`}
-  else $("msg").innerHTML=`<span style="color:var(--acc)">Fehler: ${esc(r.error)}</span>`;
+  if(r.ok){$("logo_on").checked=true;$("msg").innerHTML=`<span style="color:var(--ok)">✓ Standard logo ${esc(r.name)} (${r.size[0]} × ${r.size[1]} mm)</span>`}
+  else $("msg").innerHTML=`<span style="color:var(--acc)">Error: ${esc(r.error)}</span>`;
   await info();schedule()};
 let upKind=null;
 document.querySelectorAll("[data-up]").forEach(b=>b.onclick=()=>{upKind=b.dataset.up;$("fileinput").value="";$("fileinput").click()});
 document.querySelectorAll("[data-rm]").forEach(b=>b.onclick=async()=>{await api("/api/upload/"+b.dataset.rm,{method:"DELETE"});await info();schedule()});
 $("fileinput").onchange=async()=>{
   const f=$("fileinput").files[0];if(!f||!upKind)return;
-  const fd=new FormData();fd.append("file",f);$("msg").textContent=`Lade ${f.name}…`;
+  const fd=new FormData();fd.append("file",f);$("msg").textContent=`Loading ${f.name}…`;
   const url=upKind==="lib"?"/api/logos":"/api/upload/"+upKind;
-  let r;try{r=await api(url,{method:"POST",body:fd})}catch(e){r={ok:false,error:"Upload fehlgeschlagen (Datei zu groß?)"}}
-  if(!r.ok&&r.exists&&confirm(r.error+" Überschreiben?")){
+  let r;try{r=await api(url,{method:"POST",body:fd})}catch(e){r={ok:false,error:"Upload failed (file too large?)"}}
+  if(!r.ok&&r.exists&&confirm(r.error+" Overwrite?")){
     const fd2=new FormData();fd2.append("file",f);r=await api(url+"?overwrite=1",{method:"POST",body:fd2})}
-  if(r.ok){$("msg").innerHTML=`<span style="color:var(--ok)">✓ ${esc(r.name)} geladen (${r.size[0]} × ${r.size[1]} mm)</span>`+(r.notes.length?"<br>"+r.notes.map(esc).join("<br>"):"");
+  if(r.ok){$("msg").innerHTML=`<span style="color:var(--ok)">✓ ${esc(r.name)} loaded (${r.size[0]} × ${r.size[1]} mm)</span>`+(r.notes.length?"<br>"+r.notes.map(esc).join("<br>"):"");
     if(upKind==="logo"||upKind==="lib")$("logo_on").checked=true;if(upKind==="plate"){$("plate_src").value="file";toggleSrc()}}
-  else $("msg").innerHTML=`<span style="color:var(--acc)">Fehler: ${esc(r.error)}</span>`;
+  else $("msg").innerHTML=`<span style="color:var(--acc)">Error: ${esc(r.error)}</span>`;
   await info();schedule();
 };
 $("dl").onclick=()=>{if(!last)return;const a=document.createElement("a");
-  a.href=URL.createObjectURL(new Blob([last.gcode],{type:"text/plain"}));a.download="gravur.nc";a.click()};
+  a.href=URL.createObjectURL(new Blob([last.gcode],{type:"text/plain"}));a.download="engraving.nc";a.click()};
 $("send").onclick=async()=>{
   const p=params();
-  if(last&&last.check&&!last.check.ok){$("msg").innerHTML=`<span style="color:var(--clamp)">Nicht gesendet: Der G-Code fährt in einen Spannbereich (siehe Warnung unter der Vorschau).</span>`;return}
-  const what={engrave:"GRAVUR",air:"LUFTSCHNITT (1 mm über der Oberfläche)",outline:"UMRISS ABFAHREN (1 mm über der Oberfläche)"}[p.mode];
-  if(!confirm(`${what} starten?\n\n${p.mode==="outline"?"":`"${p.text}"\nTiefe Text: ${p.depth} mm`+($("logo_on").checked&&last&&last.logo.length?` · Logo: ${p.logo_depth} mm`:"")+"\n"}\nNullpunkt links unten + Z auf der Oberfläche gesetzt? NC-Code-Modus aktiv?`))return;
-  $("send").disabled=true;$("msg").textContent="Sende…";
+  if(last&&last.check&&!last.check.ok){$("msg").innerHTML=`<span style="color:var(--clamp)">Not sent: the G-code moves into a clamp zone (see warning below the preview).</span>`;return}
+  const what={engrave:"ENGRAVING",air:"AIR CUT (1 mm above the surface)",outline:"OUTLINE TRACE (1 mm above the surface)"}[p.mode];
+  if(!confirm(`Start ${what}?\n\n${p.mode==="outline"?"":`"${p.text}"\nText depth: ${p.depth} mm`+($("logo_on").checked&&last&&last.logo.length?` · Logo: ${p.logo_depth} mm`:"")+"\n"}\nOrigin at lower left + Z on the surface set? NC code mode active?`))return;
+  $("send").disabled=true;$("msg").textContent="Sending…";
   const r=await api("/api/send",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(p)});
-  $("msg").innerHTML=r.ok?`<span style="color:var(--ok)">✓ An Fräse gesendet.</span>`:`<span style="color:var(--acc)">Fehler: ${esc(r.error)}</span>`;
+  $("msg").innerHTML=r.ok?`<span style="color:var(--ok)">✓ Sent to machine.</span>`:`<span style="color:var(--acc)">Error: ${esc(r.error)}</span>`;
   setTimeout(()=>$("send").disabled=false,3000);
 };
 restore();toggleSrc();toggleClamp();toggleTracking();info().then(update);

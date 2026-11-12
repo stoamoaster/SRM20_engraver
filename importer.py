@@ -31,15 +31,15 @@ def load(filename, data):
     elif ext in (".dxf", ".dwg"):
         strokes, skipped = _cad(data, ext)
     else:
-        raise ImportFailed("Dateityp nicht unterstützt – bitte SVG, DXF oder DWG verwenden.")
+        raise ImportFailed("File type not supported – please use SVG, DXF or DWG.")
 
     strokes = [s for s in (_dedupe(s) for s in strokes) if len(s) >= 2]
     if not strokes:
-        raise ImportFailed("Keine verwendbaren Linien in der Datei gefunden.")
+        raise ImportFailed("No usable lines found in the file.")
     notes = []
     if skipped:
-        notes.append("Nicht übernommen: " + ", ".join(f"{n}× {t}" for t, n in skipped.most_common())
-                     + " (Texte vorher in Kurven umwandeln)")
+        notes.append("Not imported: " + ", ".join(f"{n}× {t}" for t, n in skipped.most_common())
+                     + " (convert text to curves/paths first)")
     return strokes, notes
 
 
@@ -61,7 +61,7 @@ def _cad(data, ext):
         from ezdxf import recover
         from ezdxf.disassemble import recursive_decompose
     except ImportError:
-        raise ImportFailed("Paket 'ezdxf' fehlt – start.bat erneut ausführen.")
+        raise ImportFailed("Package 'ezdxf' missing – run start.bat again.")
 
     fd, tmp = tempfile.mkstemp(suffix=ext)
     try:
@@ -71,15 +71,15 @@ def _cad(data, ext):
             from ezdxf.addons import odafc
             if not odafc.is_installed():
                 raise ImportFailed(
-                    "DWG-Dateien brauchen den kostenlosen „ODA File Converter“ "
-                    "(opendesign.com → Guest Files). Einfacher: im CAD-Programm als DXF speichern.")
+                    "DWG files need the free \"ODA File Converter\" "
+                    "(opendesign.com → Guest Files). Easier: save as DXF in your CAD program.")
             doc = odafc.readfile(tmp)
         else:
             doc, _auditor = recover.readfile(tmp)
     except ImportFailed:
         raise
     except Exception as e:
-        raise ImportFailed(f"Datei konnte nicht gelesen werden: {e}")
+        raise ImportFailed(f"File could not be read: {e}")
     finally:
         try:
             os.remove(tmp)
@@ -115,11 +115,11 @@ def _svg(data):
     try:
         from svgelements import SVG, Close, Line, Move, Shape
     except ImportError:
-        raise ImportFailed("Paket 'svgelements' fehlt – start.bat erneut ausführen.")
+        raise ImportFailed("Package 'svgelements' missing – run start.bat again.")
     try:
         svg = SVG.parse(io.BytesIO(data), reify=True)
     except Exception as e:
-        raise ImportFailed(f"SVG konnte nicht gelesen werden: {e}")
+        raise ImportFailed(f"SVG could not be read: {e}")
 
     k = 25.4 / 96  # svgelements rechnet in px (96 dpi)
 

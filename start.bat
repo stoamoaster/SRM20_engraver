@@ -6,12 +6,12 @@ set "PY=%VENV%\Scripts\python.exe"
 
 rem --- Virtuelle Umgebung pruefen / anlegen ---
 if not exist "%PY%" (
-    echo Keine virtuelle Umgebung gefunden - lege "%VENV%" an ...
+    echo No virtual environment found - creating "%VENV%" ...
     python -m venv "%VENV%"
     if errorlevel 1 (
         echo.
-        echo FEHLER: venv konnte nicht erstellt werden.
-        echo Ist Python 3 installiert und "Add Python to PATH" angehakt?
+        echo ERROR: venv could not be created.
+        echo Is Python 3 installed with "Add Python to PATH" ticked?
         pause
         exit /b 1
     )
@@ -21,12 +21,12 @@ if not exist "%PY%" (
 rem --- Pakete nur installieren, wenn neu oder requirements.txt geaendert ---
 fc /b requirements.txt "%VENV%\requirements.installed" >nul 2>&1
 if errorlevel 1 (
-    echo Installiere Pakete in "%VENV%" ...
+    echo Installing packages into "%VENV%" ...
     "%PY%" -m pip install -q --upgrade pip
     "%PY%" -m pip install -q -r requirements.txt
     if errorlevel 1 (
         echo.
-        echo FEHLER: Pakete konnten nicht installiert werden.
+        echo ERROR: packages could not be installed.
         pause
         exit /b 1
     )

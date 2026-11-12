@@ -102,32 +102,32 @@ def start(job, printer=None, force=False, queue=False):
     """Schickt einen berechneten Auftrag an die Fräse. Die Fräse läuft danach sofort los."""
     with _lock:
         if job.state != "prepared":
-            raise JobError(409, "already_started", f"Auftrag wurde schon gestartet (Zustand: {job.state}).")
+            raise JobError(409, "already_started", f"Job has already been started (state: {job.state}).")
         r = job.result
         if not r["startable"]:
-            raise JobError(422, "nothing_to_engrave", "Nichts zu gravieren – kein Text und kein Logo.")
+            raise JobError(422, "nothing_to_engrave", "Nothing to engrave – no text and no logo.")
         if not r["check"]["ok"]:  # G-Code fährt in einen Spannbereich: nie senden, auch nicht mit force
             texts = [w["message"] for w in r["warnings"] if w["code"] == "clamp_collision"]
-            raise JobError(409, "clamp_collision", " ".join(texts) or "G-Code verletzt einen Spannbereich.",
+            raise JobError(409, "clamp_collision", " ".join(texts) or "G-code violates a clamp zone.",
                            violations=r["check"]["violations"])
         if r["blocking"] and not force:
             texts = [w["message"] for w in r["warnings"] if w["code"] in r["blocking"]]
             raise JobError(409, "blocked_by_warning",
-                           "Start verweigert: " + " ".join(texts) + " Mit \"force\": true trotzdem starten.",
+                           "Start refused: " + " ".join(texts) + " Use \"force\": true to start anyway.",
                            warnings=r["blocking"])
         if not machine.can_send():
-            raise JobError(503, "machine_unavailable", "pywin32 fehlt oder kein Windows – senden nicht möglich.")
+            raise JobError(503, "machine_unavailable", "pywin32 missing or not on Windows – cannot send.")
         chosen = machine.pick_printer(printer)
         if not chosen:
             raise JobError(503, "printer_not_found",
-                           f"Drucker „{printer}“ nicht gefunden." if printer else
-                           "Kein Drucker mit „SRM“ im Namen gefunden – Feld printer angeben.",
+                           f"Printer \"{printer}\" not found." if printer else
+                           "No printer with \"SRM\" in its name found – specify the printer field.",
                            printers=machine.list_printers())
         busy = active(exclude=job)
         if busy and not queue:
             raise JobError(409, "machine_busy",
-                           f"Die Fräse ist noch mit Auftrag {busy[0].id} beschäftigt. "
-                           "Mit \"queue\": true wird der neue Auftrag dahinter eingereiht.",
+                           f"The machine is still busy with job {busy[0].id}. "
+                           "Use \"queue\": true to queue the new job behind it.",
                            active_job=busy[0].id)
         job.state, job.printer, job.started = "queued", chosen, _now()  # reserviert die Fräse
     try:
@@ -135,7 +135,7 @@ def start(job, printer=None, force=False, queue=False):
     except Exception as e:
         with _lock:
             job.state, job.message, job.finished = "failed", str(e), _now()
-        raise JobError(502, "send_failed", f"Senden fehlgeschlagen: {e}")
+        raise JobError(502, "send_failed", f"Sending failed: {e}")
     with _lock:
         job.spool_id, job.simulated = spool_id, machine.SIMULATE
     _refresh(job)
@@ -149,12 +149,12 @@ def cancel(job):
     Liefert True, wenn er dort noch entfernt werden konnte."""
     with _lock:
         if job.state in ("done", "failed", "cancelled"):
-            raise JobError(409, "already_finished", f"Auftrag ist schon abgeschlossen (Zustand: {job.state}).")
+            raise JobError(409, "already_finished", f"Job is already finished (state: {job.state}).")
         was_active = job.state in ACTIVE
         job.state, job.finished = "cancelled", _now()
         job.message = None
     removed = machine.cancel(job.printer, job.spool_id) if was_active else False
     if was_active and not removed:
-        job.message = ("Der Auftrag war schon bei der Fräse und konnte nicht mehr aus der Warteschlange "
-                       "genommen werden – in VPanel oder mit der VIEW-Taste an der Maschine anhalten.")
+        job.message = ("The job had already reached the machine and could not be removed from the queue "
+                       "– stop it in VPanel or with the VIEW button on the machine.")
     return removed

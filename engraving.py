@@ -23,16 +23,16 @@ FONT_DIR = BASE / "fonts"
 # SVG-Schriften: fein gezeichnete Single-Line-Schriften (siehe fonts/LIZENZEN.md)
 # Hershey: alte Plotter-Schriften auf grobem Raster (~0,5 mm bei 10 mm Höhe), werden geglättet
 FONT_DEFS = {
-    "relief":      ("Relief SingleLine (empfohlen)", "svg", "ReliefSingleLine.svg"),
-    "readability": ("EMS Readability (schlicht)", "svg", "EMSReadability.svg"),
-    "tech":        ("EMS Tech (technisch, Handschrift)", "svg", "EMSTech.svg"),
-    "osmotron":    ("EMS Osmotron (rund, geometrisch)", "svg", "EMSOsmotron.svg"),
-    "allure":      ("EMS Allure (Schreibschrift)", "svg", "EMSAllure.svg"),
-    "futural":     ("Hershey Futura leicht", "hershey", "futural"),
-    "futuram":     ("Hershey Futura mittel (doppelte Linie)", "hershey", "futuram"),
-    "rowmans":     ("Hershey Roman einfach", "hershey", "rowmans"),
-    "rowmand":     ("Hershey Roman doppelt", "hershey", "rowmand"),
-    "scripts":     ("Hershey Schreibschrift", "hershey", "scripts"),
+    "relief":      ("Relief SingleLine (recommended)", "svg", "ReliefSingleLine.svg"),
+    "readability": ("EMS Readability (plain)", "svg", "EMSReadability.svg"),
+    "tech":        ("EMS Tech (technical, handwriting)", "svg", "EMSTech.svg"),
+    "osmotron":    ("EMS Osmotron (round, geometric)", "svg", "EMSOsmotron.svg"),
+    "allure":      ("EMS Allure (script)", "svg", "EMSAllure.svg"),
+    "futural":     ("Hershey Futura light", "hershey", "futural"),
+    "futuram":     ("Hershey Futura medium (double line)", "hershey", "futuram"),
+    "rowmans":     ("Hershey Roman simplex", "hershey", "rowmans"),
+    "rowmand":     ("Hershey Roman duplex", "hershey", "rowmand"),
+    "scripts":     ("Hershey Script", "hershey", "scripts"),
     "timesr":      ("Hershey Times", "hershey", "timesr"),
 }
 DEFAULT_FONT = "relief"
@@ -545,7 +545,7 @@ def clip_outside(strokes, zones, extra=0.05):
 
 
 _WORD = re.compile(r"([A-Z])\s*([-+]?\d*\.?\d+)")
-_KINDS = {"cut": "Fräsbahn", "travel": "Leerfahrt", "plunge": "Zustellung in Z"}
+_KINDS = {"cut": "cutting move", "travel": "rapid move", "plunge": "Z infeed"}
 
 
 def check_gcode(gcode, zones, start=None):
@@ -596,6 +596,7 @@ WCS =("G54", "G55", "G56", "G57", "G58", "G59")
 # VIEW-/Parkposition in WERKSTÜCKkoordinaten (gewähltes System, z. B. G54),
 # an der SRM-20 gemessen: dort steht die Fräse nach Drücken der VIEW-Taste
 PARK_X, PARK_Y, PARK_Z = 33.7, 121.8, 57.5
+RAPID = 1800  # angenommene Eilgang-Geschwindigkeit für die Zeitschätzung (mm/min)
 
 
 def make_gcode(jobs, safe_z, feed, plunge, rpm, passes, wcs="G54", park=None,
@@ -679,9 +680,14 @@ def make_gcode(jobs, safe_z, feed, plunge, rpm, passes, wcs="G54", park=None,
         g.append("M05")
         rapid((0.0, 0.0))
     g.append("%")
-    # grobe Zeitschätzung (Eilgang ~ 1800 mm/min)
-    minutes = cut_len / feed + travel / 1800 + plunges * (2 * safe_z + 0.5) / plunge
-    return "\n".join(g) + "\n", minutes
+    # grobe Zeitschätzung (Eilgang ~ RAPID mm/min)
+    t_cut, t_travel, t_plunge = cut_len / feed, travel / RAPID, plunges * (2 * safe_z + 0.5) / plunge
+    minutes = t_cut + t_travel + t_plunge
+    stats = {"cut_mm": round(cut_len, 1), "travel_mm": round(travel, 1), "plunges": plunges,
+             "z_min": round(min((-d for st, d in jobs if st), default=0.0), 3),
+             "minutes_cut": round(t_cut, 2), "minutes_travel": round(t_travel, 2),
+             "minutes_plunge": round(t_plunge, 2)}
+    return "\n".join(g) + "\n", minutes, stats
 
 
 # ---------------------------------------------------------------- Aufbau des Schilds
@@ -720,8 +726,8 @@ def build(p, logo=None, contour=None):
         plate_strokes = rounded_rect(pw, ph, pr)
         plate = {"kind": "rect", "w": pw, "h": ph, "r": pr}
     if pw > WORK_X or ph > WORK_Y:
-        warn("plate_too_large", f"Werkstück ({pw:.0f} × {ph:.0f} mm) ist größer als der Arbeitsbereich "
-                                f"der SRM-20 ({WORK_X:.0f} × {WORK_Y:.0f} mm).")
+        warn("plate_too_large", f"Workpiece ({pw:.0f} × {ph:.0f} mm) is larger than the working area "
+                                f"of the SRM-20 ({WORK_X:.0f} × {WORK_Y:.0f} mm).")
 
     # --- Text: zentriert, Unterkante "bottom" mm über der Werkstückkante
     style = dict(align=p["align"], smooth=p["smooth"], width=p["width_pct"] / 100,
@@ -746,13 +752,13 @@ def build(p, logo=None, contour=None):
             text_s = text_to_strokes(text, real_h, font, **style)
             tb = bbox_of(text_s)
         if real_h < height:
-            warn("text_shrunk", f"Text zu breit – Schrifthöhe automatisch auf {real_h:.1f} mm verkleinert.")
+            warn("text_shrunk", f"Text too wide – text height automatically reduced to {real_h:.1f} mm.")
     if tb:
         text_s = transform(text_s, 1, pw / 2 - (tb[0] + tb[2]) / 2, bottom - tb[1])
         tb = bbox_of(text_s)
     miss = missing_chars(text, font)
     if miss:
-        warn("missing_chars", "Nicht in der Schrift enthalten (wird ausgelassen): " + " ".join(miss))
+        warn("missing_chars", "Not contained in the font (will be skipped): " + " ".join(miss))
 
     # --- Logo: in den freien Bereich über dem Text eingepasst
     logo_s, logo_area = [], None
@@ -770,10 +776,10 @@ def build(p, logo=None, contour=None):
             if p["logo_fill"]:
                 fill = hatch(logo_s, p["fill_step"])
                 if not fill:
-                    warn("logo_no_fill", "Logo hat keine geschlossenen Flächen – Füllen nicht möglich.")
+                    warn("logo_no_fill", "Logo has no closed areas – filling not possible.")
                 logo_s += fill
         else:
-            warn("logo_no_space", "Kein Platz für das Logo – Text kleiner machen oder Ränder verringern.")
+            warn("logo_no_space", "No space for the logo – make the text smaller or reduce the margins.")
         logo_area = area
 
     # --- Randprüfung
@@ -781,9 +787,9 @@ def build(p, logo=None, contour=None):
     if pts:
         worst = min(edge_distance(pt, plate) for pt in pts)
         if worst < 0:
-            warn("outside", "Achtung: Teile der Gravur liegen AUSSERHALB des Werkstücks!")
+            warn("outside", "Warning: parts of the engraving lie OUTSIDE the workpiece!")
         elif worst < EDGE_MIN:
-            warn("near_edge", f"Gravur liegt nur {worst:.2f} mm vom Werkstückrand entfernt.")
+            warn("near_edge", f"Engraving is only {worst:.2f} mm away from the workpiece edge.")
 
     # --- Spannbereiche: dort darf die Fräse nicht hin, Leerfahrten werden darum herumgeführt.
     # Das Programm fährt IMMER zuerst in die VIEW-Position (erst Z hoch, dann X/Y) – danach ist die
@@ -797,15 +803,15 @@ def build(p, logo=None, contour=None):
     text_o = optimize_order(text_s)
     logo_o = optimize_order(logo_s, text_o[-1][-1] if text_o else (0.0, 0.0))
     if mode == "air":  # Luftschnitt: Fräser fährt 1 mm ÜBER der Oberfläche
-        gcode, minutes = make_gcode([(text_o, -1.0), (logo_o, -1.0)], max(safe_z, 3), *cut, 1, p["wcs"], park,
+        gcode, minutes, stats = make_gcode([(text_o, -1.0), (logo_o, -1.0)], max(safe_z, 3), *cut, 1, p["wcs"], park,
                                     **safe)
     elif mode == "outline":  # nur Werkstückumriss 1 mm über der Oberfläche abfahren
         outline = clip_outside(plate_strokes, zones)
         if zones and outline != plate_strokes:
-            warn("outline_clipped", "Der Umriss wird in den Spannbereichen ausgelassen und dort umfahren.")
-        gcode, minutes = make_gcode([(outline, -1.0)], max(safe_z, 3), *cut, 1, p["wcs"], park, **safe)
+            warn("outline_clipped", "The outline is skipped inside the clamp zones and routed around them.")
+        gcode, minutes, stats = make_gcode([(outline, -1.0)], max(safe_z, 3), *cut, 1, p["wcs"], park, **safe)
     else:
-        gcode, minutes = make_gcode([(text_o, depth), (logo_o, p["logo_depth"])], safe_z, *cut,
+        gcode, minutes, stats = make_gcode([(text_o, depth), (logo_o, p["logo_depth"])], safe_z, *cut,
                                     p["passes"], p["wcs"], park, **safe)
 
     # --- Kontrolle des fertigen G-Codes gegen die Spannbereiche (sperrt das Senden, auch mit force)
@@ -815,19 +821,19 @@ def build(p, logo=None, contour=None):
         kinds = [v["kind"] for v in check["violations"]]
         first = check["violations"][0]
         if "cut" in kinds or "plunge" in kinds:
-            why = "Die Gravur liegt im Spannbereich – Text/Logo verschieben oder verkleinern."
+            why = "The engraving lies inside a clamp zone – move or shrink the text/logo."
         else:
-            why = ("Eine Leerfahrt führt durch den Spannbereich und lässt sich nicht umfahren "
-                   "(Start-/Parkposition oder Nullpunkt liegt in der Sperrzone?).")
-        warn("clamp_collision", f"SPANNBEREICH VERLETZT: {check['count']} Bewegung(en) im gesperrten Bereich, "
-                                f"zuerst G-Code-Zeile {first['line']} ({_KINDS.get(first['kind'], 'nicht prüfbar')}: "
-                                f"{first['code']}). {why} Senden ist gesperrt.")
+            why = ("A rapid move passes through a clamp zone and cannot be routed around it "
+                   "(start/park position or origin inside the restricted zone?).")
+        warn("clamp_collision", f"CLAMP ZONE VIOLATED: {check['count']} move(s) inside the restricted area, "
+                                f"first at G-code line {first['line']} ({_KINDS.get(first['kind'], 'not checkable')}: "
+                                f"{first['code']}). {why} Sending is blocked.")
 
     has_work = bool(text_s or logo_s)
     blocking = [w["code"] for w in warnings
                 if w["code"] in BLOCKING and not (mode == "outline" and w["code"] == "outside")]
     return dict(text=text_s, logo=logo_s, plate=plate_strokes, plate_size=(pw, ph), logo_area=logo_area,
-                text_height=real_h if tb else None, text_bbox=tb, gcode=gcode, minutes=minutes,
+                text_height=real_h if tb else None, text_bbox=tb, gcode=gcode, minutes=minutes, stats=stats,
                 warnings=warnings, blocking=blocking, has_work=has_work, check=check,
                 clamps=[[round(cx, 3), round(cy, 3), round(R - p["clamp_margin"], 3), round(R, 3)]
                         for cx, cy, R in zones],

@@ -28,6 +28,9 @@ GET  /api/v1/jobs/<id>                                     ->  job.state: queued
 
 ## Grundlagen
 
+> **Sprache:** Alle Texte, die das Programm ausgibt (Meldungen, Warnungen, Bericht, Weboberfläche), sind **englisch**.
+> Diese Dokumentation ist deutsch.
+
 | | |
 |---|---|
 | **Basis-URL** | `http://<PC-mit-Fräse>:5000/api/v1` (lokal: `http://localhost:5000/api/v1`) |
@@ -54,10 +57,10 @@ Fehler: `"ok": false` und ein `error`-Objekt. `code` ist stabil und für Program
   "ok": false,
   "error": {
     "code": "invalid_parameters",
-    "message": "Ungültige Parameter – nichts berechnet, nichts gesendet.",
+    "message": "Invalid parameters – nothing calculated, nothing sent.",
     "details": [
-      {"field": "depth", "message": "muss höchstens 5 sein (ist 9)"},
-      {"field": "hight", "message": "unbekanntes Feld – meintest du „height“?"}
+      {"field": "depth", "message": "must be at most 5 (is 9)"},
+      {"field": "hight", "message": "unknown field – did you mean \"height\"?"}
     ]
   }
 }
@@ -80,7 +83,7 @@ Fehler: `"ok": false` und ein `error`-Objekt. `code` ist stabil und für Program
 
 **Strenge Prüfung:** Anders als die Weboberfläche korrigiert die API v1 nichts stillschweigend.
 Ein Wert außerhalb der Grenzen, ein falscher Typ oder ein unbekanntes Feld (Tippfehler) führt zu
-`invalid_parameters`, und es wird nichts berechnet und nichts gesendet. Fehlende Felder bekommen den Standardwert.
+`invalid_parameters`, und es wird nichts berechnet und nichts gesendet. Fehlende Felder, `null` und leerer Text (`""`) bekommen den Standardwert.
 
 ---
 
@@ -114,7 +117,7 @@ Body: die [Auftrags-Parameter](#auftrags-parameter) und dazu diese Steuerfelder.
 | `printer` | Text | automatisch | Druckername der Fräse. Ohne Angabe: `SRM20_PRINTER`, sonst der erste Drucker mit „SRM“ im Namen. |
 | `logo` | Objekt | gespeichertes Logo | Logo nur für diesen Auftrag, siehe [Logo und Kontur](#logo-und-kontur-als-json) |
 | `plate_contour` | Objekt | – | Werkstück-Umriss nur für diesen Auftrag. Ersetzt `plate_w`/`plate_h`/`plate_r`. |
-| `include` | Liste | `[]` | Zusätzlich in die Antwort aufnehmen: `"params"`, `"gcode"`, `"geometry"` |
+| `include` | Liste | `["report"]` | Zusätzlich in die Antwort aufnehmen: `"params"`, `"gcode"`, `"geometry"`. Der Bericht (`report`) ist immer dabei. |
 
 Beispiel:
 
@@ -147,7 +150,7 @@ Antwort **201** mit dem Auftrag:
     "minutes": 1.84,
     "gcode_lines": 262,
     "warnings": [
-      {"code": "text_shrunk", "message": "Text zu breit – Schrifthöhe automatisch auf 8.3 mm verkleinert."}
+      {"code": "text_shrunk", "message": "Text too wide – text height automatically reduced to 8.3 mm."}
     ],
     "can_start": false,
     "needs_force": false,
@@ -169,14 +172,14 @@ Antwort **201** mit dem Auftrag:
 |---|---|
 | `id` | Kennung des Auftrags für alle weiteren Aufrufe |
 | `state` | Zustand, siehe [Zustände](#zustände) |
-| `message` | Hinweis zum Zustand, z. B. „Fräse offline oder nicht verbunden“ (`null` = nichts) |
+| `message` | Hinweis zum Zustand, z. B. „Machine offline or not connected“ (`null` = nichts) |
 | `minutes` | Geschätzte Laufzeit |
 | `gcode_lines` | Zeilen im G-Code |
 | `warnings` | Hinweise mit stabilem `code` und deutschem Text, siehe [Warnungen](#warnungen) |
 | `can_start` | `true` = der Auftrag ist berechnet und kann gestartet werden |
 | `needs_force` | `true` = Start nur mit `"force": true` |
 | `gcode_check` | Kontrolle des fertigen G-Codes gegen die Spannbereiche: `{"ok", "moves", "count", "violations": [{"line", "code", "kind"}], "start"}`. `ok: false` sperrt den Start. |
-| `clamps` | Spannbereiche als `[cx, cy, Radius, Radius mit Sicherheitsabstand]` (leer = abgeschaltet) |
+| `clamps` | Spannbereiche als `[cx, cy, Radius, Radius mit Sicherheitsabstand]` (leere Liste nur bei ausdrücklich `"clamp_on": false`) |
 | `plate_size` | `[Breite, Höhe]` des Werkstücks |
 | `text_height` | Tatsächliche Schrifthöhe nach der automatischen Verkleinerung (`null` ohne Text) |
 | `text_bbox` | Rahmen um den Text `[x0, y0, x1, y1]` (`null` ohne Text) |
@@ -186,8 +189,29 @@ Antwort **201** mit dem Auftrag:
 | `gcode` | nur mit `include`: vollständiges NC-Programm |
 | `geometry` | nur mit `include`: `{"text": […], "logo": […], "plate": […]}` als Linien für eine eigene Vorschau |
 
-Schlägt bei `"start": true` nur der Start fehl (z. B. `machine_busy`), ist der Auftrag trotzdem
-berechnet. Er steht dann in `error.job` und lässt sich später mit `/start` starten.
+Schlägt bei `"start": true` nur der Start fehl (z. B. `machine_busy`, `clamp_collision`), ist der Auftrag
+trotzdem berechnet. Er steht dann samt Bericht in `error.job` und lässt sich später mit `/start` starten.
+
+### Bericht (`report`)
+
+Jede Antwort mit einem Auftrag (`POST /jobs`, `GET /jobs/<id>`, `/start`, `/cancel` und `error.job`)
+enthält unter `job.report` einen ausführlichen Bericht. Nur die Auftragsliste `GET /jobs` lässt ihn weg.
+
+| Feld | Inhalt |
+|---|---|
+| `summary` | Ein Satz zum Anzeigen, z. B. „Engraving "Max Muster" + Logo on 70 × 50 mm, estimated runtime 3 min 43 s, 720 G-code lines. Clamp zones: active, G-code check: OK. State: …“ |
+| `state` | `code`, `text`, `message`, `created`, `started`, `finished`, `estimated_finish` (Start + Laufzeit), `printer`, `simulated` |
+| `runtime` | Geschätzte Laufzeit: `seconds`, `minutes`, `text` („3 min 43 s“), aufgeteilt in `cutting_minutes`, `travel_minutes`, `plunge_minutes` |
+| `start` | `can_start`, `needs_force`, `blocked_reasons` (Liste der Gründe auf Deutsch, leer = startbar) |
+| `mode` | `code` und Klartext |
+| `plate` | Quelle, Name der Kontur, `width`, `height`, `corner_radius`, Arbeitsbereich der Fräse |
+| `text` | Inhalt, Schrift, angeforderte und tatsächliche Höhe, `shrunk`, Größe, Rahmen, Tiefe |
+| `logo` | ob graviert, Name, Quelle (gespeichert / Standard-Logo / im Auftrag), Bereich, Rahmen, Tiefe, Füllung, Größe in % |
+| `clamps` | `active`, `source` (`default` / `custom`), Durchmesser, Eindringtiefe, Kreismitte Y, Sicherheitsabstand, `zones` |
+| `milling` | Tiefen, Durchgänge, Vorschub, Eintauchen, Drehzahl, Sicherheits-Z, Koordinatensystem, Start- und Endposition |
+| `toolpath` | `gcode_lines`, `cut_length_mm`, `travel_length_mm`, `plunges`, `z_min` (tiefster Punkt) |
+| `gcode_check` | Ergebnis der Kontrolle gegen die Spannbereiche |
+| `warnings` | alle Warnungen |
 
 ### Warnungen
 
@@ -335,7 +359,7 @@ Das gilt unabhängig vom Schalter `park` (der regelt nur die Fahrt am Ende).
 
 | Feld | Typ | Standard | Bereich | Bedeutung |
 |---|---|---|---|---|
-| `clamp_on` | bool | `true` | | Spannbereiche sperren |
+| `clamp_on` | bool | `true` | | Spannbereiche sperren. Fehlt das Feld oder ist es `null`/leer, gelten **immer** die Standard-Spannbereiche. Abschalten nur mit ausdrücklich `false`. |
 | `clamp_d` | Zahl | 30 | 1–200 | Durchmesser des Kreises |
 | `clamp_in` | Zahl | 7 | 0–100 | So weit ragt der Kreis ins Werkstück |
 | `clamp_y` | Zahl | halbe Höhe | −1000–1000 | Y der Kreismitte |

@@ -18,7 +18,7 @@ class SvgFont:
         root = ET.parse(path).getroot()
         font = root.find(f".//{NS}font")
         if font is None:
-            raise ValueError(f"{path}: keine <font> gefunden")
+            raise ValueError(f"{path}: no <font> found")
         self.default_adv = float(font.get("horiz-adv-x", 500))
         self.glyphs = {}   # Zeichen -> (d, Vorschub)
         names = {}         # glyph-name -> Zeichen
