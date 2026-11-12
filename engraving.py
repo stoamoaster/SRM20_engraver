@@ -599,11 +599,15 @@ PARK_X, PARK_Y, PARK_Z = 33.7, 121.8, 57.5
 
 
 def make_gcode(jobs, safe_z, feed, plunge, rpm, passes, wcs="G54", park=None,
-               zones=(), start=(0.0, 0.0), bounds=None):
+               zones=(), start=(0.0, 0.0), bounds=None, home=None):
     """jobs: Liste von (strokes, tiefe). Tiefe < 0 = über der Oberfläche (Luftschnitt).
 
     zones: Sperrzonen (cx, cy, R) – Leerfahrten werden darum herumgeführt (siehe route).
     start: X/Y-Position der Fräse beim Programmstart, bounds: Bereich, in dem umfahren werden darf.
+
+    home: (x, y, z) = VOR dem Fräsen in diese Position fahren (VIEW-Position): erst nur Z hoch,
+    dann X/Y. Danach ist die Position bekannt, unabhängig davon, wo die Fräse vorher stand.
+    Die erste Anfahrt zum Werkstück erfolgt in dieser Höhe, erst über dem Ziel geht es auf safe_z.
 
     park: None = am Ende zum Werkstück-Nullpunkt (X0 Y0) fahren.
     (x, y, z) = Parkposition im Werkstück-Koordinatensystem: erst Z hoch, dann X/Y.
@@ -614,12 +618,18 @@ def make_gcode(jobs, safe_z, feed, plunge, rpm, passes, wcs="G54", park=None,
     g = ["%",
          "G17 G21 G90",  # XY-Ebene, mm, absolut
          "G40 G49 G80",  # Radius-/Längenkorrektur und Zyklen aus
-         wcs,            # Nullpunkt aus VPanel verwenden
-         f"G00 Z{safe_z:.3f}",
-         # Drehzahl laut Roland-Handbuch als ganze Zahl OHNE Dezimalpunkt (>= 100 = U/min),
-         # erst setzen, dann Spindel mit M03 starten
-         f"S{int(round(rpm))}",
-         "M03"]
+         wcs]            # Nullpunkt aus VPanel verwenden
+    high = None  # Z-Höhe, in der die erste Anfahrt läuft (nur mit home)
+    if home:
+        high = max(home[2], safe_z)
+        g += [f"G00 Z{high:.3f}",                        # zuerst NUR Z nach oben
+              f"G00 X{home[0]:.3f} Y{home[1]:.3f}"]       # dann X/Y in die VIEW-Position
+        start = home[:2]
+    else:
+        g.append(f"G00 Z{safe_z:.3f}")
+    # Drehzahl laut Roland-Handbuch als ganze Zahl OHNE Dezimalpunkt (>= 100 = U/min),
+    # erst setzen, dann Spindel mit M03 starten
+    g += [f"S{int(round(rpm))}", "M03"]
     # Vorschub IMMER mit Dezimalpunkt: "F240" würde als 0,240 mm/min gelesen
     # (konventionelle Interpretation, Einheit 0,001 mm/min) -> Fräse fährt mit Minimalspeed
     f_feed, f_plunge = f"F{feed:.1f}", f"F{plunge:.1f}"
@@ -629,11 +639,15 @@ def make_gcode(jobs, safe_z, feed, plunge, rpm, passes, wcs="G54", park=None,
 
     def rapid(target):
         """Leerfahrt in X/Y zum Ziel, wenn nötig mit Zwischenpunkten um die Sperrzonen."""
-        nonlocal travel, pos
+        nonlocal travel, pos, high
         for wx, wy in route(pos, target, zones, bounds):
             g.append(f"G00 X{wx:.3f} Y{wy:.3f}")
             travel += math.dist(pos, (wx, wy))
             pos = (wx, wy)
+        if high is not None:  # erste Anfahrt aus der VIEW-Höhe: erst über dem Ziel absenken
+            g.append(f"G00 Z{safe_z:.3f}")
+            travel += high - safe_z
+            high = None
 
     for strokes, depth in jobs:
         if not strokes:
@@ -657,6 +671,7 @@ def make_gcode(jobs, safe_z, feed, plunge, rpm, passes, wcs="G54", park=None,
                     cut_len += math.hypot(bx - ax, by - ay)
                 pos = s[-1]
             g.append(f"G00 Z{safe_z:.3f}")
+    high = None  # Rückfahrt: nicht mehr absenken
     if park:
         g += ["M05", f"G00 Z{max(park[2], safe_z):.3f}"]  # zuerst nur Z nach oben
         rapid((park[0], park[1]))                         # dann X/Y in die VIEW-/Parkposition
@@ -771,10 +786,11 @@ def build(p, logo=None, contour=None):
             warn("near_edge", f"Gravur liegt nur {worst:.2f} mm vom Werkstückrand entfernt.")
 
     # --- Spannbereiche: dort darf die Fräse nicht hin, Leerfahrten werden darum herumgeführt.
-    # Annahme für die Anfahrt: Die Fräse steht beim Start in der VIEW-/Parkposition.
+    # Das Programm fährt IMMER zuerst in die VIEW-Position (erst Z hoch, dann X/Y) – danach ist die
+    # Position bekannt, egal wo die Fräse vorher stand, und alle weiteren Fahrten sind geprüft.
     zones = clamp_zones(p, pw, ph)
-    start = (p["park_x"], p["park_y"]) if zones else (0.0, 0.0)
-    safe = dict(zones=zones, start=start, bounds=(0.0, 0.0, pw, ph))
+    home = (p["park_x"], p["park_y"], p["park_z"])
+    safe = dict(zones=zones, home=home, bounds=(0.0, 0.0, pw, ph))
 
     # --- G-Code
     cut = (p["feed"], p["plunge"], p["rpm"])
@@ -793,7 +809,8 @@ def build(p, logo=None, contour=None):
                                     p["passes"], p["wcs"], park, **safe)
 
     # --- Kontrolle des fertigen G-Codes gegen die Spannbereiche (sperrt das Senden, auch mit force)
-    check = check_gcode(gcode, zones, start if zones else None)
+    # Startposition unbekannt -> der Checker prüft die erste Fahrt (in die VIEW-Position) nur am Ziel
+    check = check_gcode(gcode, zones, None)
     if not check["ok"]:
         kinds = [v["kind"] for v in check["violations"]]
         first = check["violations"][0]

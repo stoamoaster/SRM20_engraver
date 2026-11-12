@@ -31,7 +31,8 @@ Standard: Platte **70 × 50 mm** quer, mit runden Ecken.
 - **Spannbereiche** (rot in der Vorschau): links und rechts je ein Kreis (Standard Ø 30 mm, ragt 7 mm
   ins Werkstück, auf halber Höhe). Die Fräse fährt dort nie durch; Leerfahrten werden über dem
   Werkstück darum herumgeführt. Der fertige G-Code wird zusätzlich kontrolliert. Liegt etwas im
-  roten Bereich, wird nicht gesendet. Angenommen wird, dass die Fräse beim Start in der VIEW-Position steht.
+  roten Bereich, wird nicht gesendet. Jedes Programm fährt zu Beginn immer zuerst in die VIEW-Position
+  (erst Z hoch, dann X/Y) und von dort in VIEW-Höhe über den Startpunkt – erst dann wird abgesenkt.
 
 ## Logo-Dateien
 - **SVG** (z. B. aus Inkscape/Illustrator) oder **DXF** (aus jedem CAD-Programm).

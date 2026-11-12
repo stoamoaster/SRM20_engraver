@@ -328,7 +328,9 @@ richtet sich nach einem anderen Feld (`logo_depth`, `fill_step`).
 Links und rechts vom Werkstück liegt je ein Kreis (Spannvorrichtung), der ins Werkstück ragt.
 Die Fräse fährt in X/Y nie hinein, auch nicht bei Leerfahrten: Diese werden über dem Werkstück
 um den Kreis herumgeführt. Der fertige G-Code wird danach Zeile für Zeile kontrolliert (`gcode_check`).
-Für die erste Anfahrt wird angenommen, dass die Fräse in der VIEW-/Parkposition (`park_x`/`park_y`) steht.
+Jedes Programm fährt zu Beginn immer zuerst in die VIEW-Position (`park_x`/`park_y`/`park_z`):
+erst nur Z hoch, dann X/Y. Von dort geht es in dieser Höhe über den ersten Startpunkt, erst dann auf `safe_z`.
+Das gilt unabhängig vom Schalter `park` (der regelt nur die Fahrt am Ende).
 
 | Feld | Typ | Standard | Bereich | Bedeutung |
 |---|---|---|---|---|
