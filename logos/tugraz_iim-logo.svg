@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 576 576">
+  <defs>
+    <style>
+      .cls-1{fill:none;stroke:#000000;stroke-miterlimit:10}
+    </style>
+  </defs>
+  <title>Artboard 1</title>
+  <g id="Layer_1" data-name="Layer 1">
+    <g>
+      <line x1="17.125" y1="17.075" x2="288.025" y2="171.925" class="cls-1"/>
+      <line x1="288.025" y1="171.925" x2="558.875" y2="17.075" class="cls-1"/>
+      <line x1="558.875" y1="17.075" x2="558.875" y2="558.925" class="cls-1"/>
+      <line x1="558.875" y1="558.925" x2="287.975" y2="404.075" class="cls-1"/>
+      <line x1="287.975" y1="404.075" x2="491.225" y2="288.825" class="cls-1"/>
+      <line x1="491.225" y1="288.825" x2="288.025" y2="172.725" class="cls-1"/>
+      <line x1="17.125" y1="17.075" x2="17.125" y2="558.925" class="cls-1"/>
+      <line x1="17.125" y1="558.925" x2="288.025" y2="404.975" class="cls-1"/>
+      <line x1="84.875" y1="442.225" x2="354.675" y2="288.025" class="cls-1"/>
+      <line x1="354.675" y1="288.025" x2="84.825" y2="133.825" class="cls-1"/>
+      <line x1="84.825" y1="133.825" x2="84.875" y2="442.225" class="cls-1"/>
+      <line x1="219.775" y1="211.775" x2="84.875" y2="288.025" class="cls-1"/>
+      <line x1="84.875" y1="288.025" x2="219.775" y2="365.125" class="cls-1"/>
+    </g>
+  </g>
+</svg>
